@@ -1,28 +1,48 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getDataset } from "@/data/dataset";
+import { isDatabaseConfigured } from "@/lib/server/env";
+import { getConnectedShop } from "@/lib/server/repo";
+import { runSync } from "@/lib/server/sync";
 
 /**
- * Synchronisation initiale / incrémentale avec Shopify.
+ * POST /api/shopify/sync — synchronisation Shopify → base.
+ * body optionnel : { rangeDays?: 30 | 90 }
  *
- * TODO(prod) :
- *  1. Charger le token de la boutique authentifiée.
- *  2. Paginer GET /admin/api/2025-01/orders.json (updated_at_min = dernier sync)
- *     + produits + clients + remboursements.
- *  3. Upserter en base (Supabase/Prisma), puis relancer la réconciliation
- *     (lib/reconciliation.ts) sur la fenêtre impactée.
- *  4. Journaliser la progression pour l'UI d'onboarding.
+ * V1 : fenêtre 30 jours par défaut, 90 jours maximum.
  */
-export async function POST() {
-  const dataset = getDataset();
+export async function POST(req: NextRequest) {
+  if (!isDatabaseConfigured()) {
+    const demo = getDataset();
+    return NextResponse.json({
+      mode: "demo",
+      message: "Aucune base configurée : données de démonstration uniquement.",
+      counts: {
+        products: demo.products.length,
+        sessions: demo.sessions.length,
+        orders: demo.orders.length,
+      },
+    });
+  }
 
-  return NextResponse.json({
-    mode: "demo",
-    syncedAt: new Date().toISOString(),
-    counts: {
-      products: dataset.products.length,
-      sessions: dataset.sessions.length,
-      orders: dataset.orders.length,
-      anomalies: dataset.anomalies.length,
+  const shop = await getConnectedShop();
+  if (!shop) {
+    return NextResponse.json(
+      { mode: "demo", error: "Aucune boutique connectée. Lancez la connexion OAuth d'abord." },
+      { status: 409 }
+    );
+  }
+
+  const body = (await req.json().catch(() => ({}))) as { rangeDays?: number };
+  const rangeDays = Math.min(90, Math.max(1, Number(body.rangeDays ?? 30)));
+
+  const result = await runSync(shop, rangeDays);
+  return NextResponse.json(
+    {
+      mode: "live",
+      shop: shop.shopify_domain,
+      rangeDays,
+      ...result,
     },
-  });
+    { status: result.status === "success" ? 200 : 502 }
+  );
 }

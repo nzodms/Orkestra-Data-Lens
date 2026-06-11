@@ -1,0 +1,26 @@
+# Extension Web Pixel Orkestra Data Lens
+# Déploiement : `shopify app deploy` depuis la racine d'une app Shopify CLI
+# contenant ce dossier dans /extensions.
+
+api_version = "2025-01"
+
+[[extensions]]
+name = "Orkestra Data Lens Pixel"
+handle = "orkestra-data-lens-pixel"
+type = "web_pixel_extension"
+runtime_context = "strict"
+
+  [extensions.customer_privacy]
+  analytics = true
+  marketing = false
+  preferences = false
+  sale_of_data = "disabled"
+
+  # settings.endpoint est renseigné à l'activation du pixel
+  # (mutation webPixelCreate avec { endpoint: "https://.../api/tracking/event" })
+  [extensions.settings]
+  type = "object"
+
+    [extensions.settings.fields.endpoint]
+    name = "Endpoint d'ingestion"
+    type = "single_line_text_field"

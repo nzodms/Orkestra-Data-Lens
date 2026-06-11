@@ -146,7 +146,9 @@ export function generatePriorityActions(dataset: Dataset, period: Period): Prior
       impact: "medium",
       difficulty: "easy",
       type: "tracking",
-      justification: `${missingUtm.affectedSessions} sessions à référent publicitaire sans UTM sur 7 jours, dont une avec achat confirmé (${formatEUR(missingUtm.affectedRevenue ?? 0)}) classée « source inconnue ».`,
+      justification: `${missingUtm.affectedSessions} sessions à référent publicitaire sans UTM sur 7 jours${
+        missingUtm.affectedRevenue ? `, dont du CA confirmé (${formatEUR(missingUtm.affectedRevenue)})` : ""
+      } classées « source inconnue ».`,
     });
   }
 

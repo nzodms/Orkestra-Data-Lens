@@ -1,22 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { upsertOrderFromPayload, type ShopifyOrderPayload } from "@/lib/server/repo";
+import { handleShopifyWebhook } from "@/lib/server/webhooks";
 
 /**
- * Webhook Shopify `orders/create` et `orders/paid`.
+ * Webhooks `orders/create`, `orders/paid`, `orders/updated`.
+ * HMAC vérifié sur le raw body, déduplication par X-Shopify-Webhook-Id,
+ * livraison journalisée dans webhook_deliveries.
  *
- * TODO(prod) :
- *  1. Vérifier l'en-tête X-Shopify-Hmac-Sha256 avec SHOPIFY_API_SECRET.
- *  2. Dédupliquer via X-Shopify-Webhook-Id.
- *  3. Upserter la commande, tenter la réconciliation immédiate :
- *     cart_token / checkout_token → session pixel → statut "confirmed".
- *  4. Si aucune session trouvée après 15 min → anomalie `order_without_session`.
- *  5. Répondre 200 en < 5 s (traitement lourd en file d'attente).
+ * La commande Shopify est la source de vérité : son upsert permet ensuite au
+ * moteur de réconciliation de confirmer les événements pixel correspondants
+ * (cart_token / checkout_token / order_id).
  */
 export async function POST(req: NextRequest) {
-  const payload = await req.json().catch(() => null);
-
-  return NextResponse.json({
-    mode: "demo",
-    received: payload != null,
-    topic: req.headers.get("x-shopify-topic") ?? "orders/create",
+  return handleShopifyWebhook(req, async ({ shop, payload }) => {
+    if (!shop) throw new Error("Boutique inconnue pour ce webhook");
+    await upsertOrderFromPayload(shop.id, payload as ShopifyOrderPayload);
   });
 }

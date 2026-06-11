@@ -10,10 +10,12 @@ export default function Sidebar({
   anomalyCount,
   shopName,
   shopDomain,
+  mode,
 }: {
   anomalyCount: number;
   shopName: string;
   shopDomain: string;
+  mode: "demo" | "live";
 }) {
   const pathname = usePathname();
   const search = useSearchParams();
@@ -61,17 +63,33 @@ export default function Sidebar({
 
       <div className="m-3 rounded-xl border border-gray-200/80 bg-gray-50/80 p-3">
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-warn pulse-dot" />
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-warn">Mode démo</span>
+          <span className={cn("h-2 w-2 rounded-full pulse-dot", mode === "live" ? "bg-positive" : "bg-warn")} />
+          <span
+            className={cn(
+              "text-[11px] font-semibold uppercase tracking-wide",
+              mode === "live" ? "text-positive" : "text-warn"
+            )}
+          >
+            {mode === "live" ? "Données live" : "Mode démo"}
+          </span>
         </div>
         <div className="mt-1.5 truncate text-[12.5px] font-medium">{shopName}</div>
         <div className="truncate text-[11px] text-ink-soft">{shopDomain}</div>
-        <Link
-          href="/onboarding"
-          className="mt-2.5 block rounded-lg bg-brand px-3 py-1.5 text-center text-[12px] font-semibold text-white transition-colors hover:bg-brand-strong"
-        >
-          Connecter ma boutique
-        </Link>
+        {mode === "demo" ? (
+          <Link
+            href="/onboarding"
+            className="mt-2.5 block rounded-lg bg-brand px-3 py-1.5 text-center text-[12px] font-semibold text-white transition-colors hover:bg-brand-strong"
+          >
+            Connecter ma boutique
+          </Link>
+        ) : (
+          <Link
+            href="/settings"
+            className="mt-2.5 block rounded-lg border border-gray-200/80 bg-white px-3 py-1.5 text-center text-[12px] font-semibold text-ink transition-colors hover:bg-gray-50"
+          >
+            État de la connexion
+          </Link>
+        )}
       </div>
     </aside>
   );

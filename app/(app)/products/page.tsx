@@ -2,7 +2,8 @@ import { Lightbulb } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { getDataset } from "@/data/dataset";
+import { LiveEmptyState } from "@/components/domain/LiveEmptyState";
+import { getActiveDataset } from "@/lib/server/datasource";
 import {
   computeProductStats,
   PRODUCT_CATEGORY_LABELS,
@@ -27,7 +28,10 @@ export default async function ProductsPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const period = parsePeriod((await searchParams).period);
-  const dataset = getDataset();
+  const { dataset, mode, status, liveEmpty } = await getActiveDataset();
+  if (mode === "live" && liveEmpty && dataset.products.length === 0) {
+    return <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />;
+  }
   const stats = computeProductStats(dataset, period);
   const insights = stats.filter((s) => s.insight);
 

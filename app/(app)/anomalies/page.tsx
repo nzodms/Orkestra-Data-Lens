@@ -2,13 +2,13 @@ import { ShieldQuestion } from "lucide-react";
 import { AnomalyCard } from "@/components/domain/AnomalyCard";
 import { Card } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
-import { getDataset } from "@/data/dataset";
+import { getActiveDataset } from "@/lib/server/datasource";
 import { formatEUR } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function AnomaliesPage() {
-  const dataset = getDataset();
+export default async function AnomaliesPage() {
+  const { dataset } = await getActiveDataset();
   const anomalies = dataset.anomalies;
   const totalSessions = anomalies.reduce((a, b) => a + b.affectedSessions, 0);
   const totalRevenue = anomalies.reduce((a, b) => a + (b.affectedRevenue ?? 0), 0);

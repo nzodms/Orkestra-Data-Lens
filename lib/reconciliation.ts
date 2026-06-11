@@ -20,7 +20,11 @@ import { dayOffsetOf, formatEUR } from "./utils";
 
 const PAID_REFERRER_HINTS = ["facebook", "instagram", "tiktok", "l.instagram"];
 
-export function reconcileDataset(sessions: VisitorSession[], orders: ShopifyOrder[]): Anomaly[] {
+export function reconcileDataset(
+  sessions: VisitorSession[],
+  orders: ShopifyOrder[],
+  shopId = "shop_demo_01"
+): Anomaly[] {
   const orderIds = new Set(orders.map((o) => o.id));
   const anomalies: Anomaly[] = [];
 
@@ -104,12 +108,20 @@ export function reconcileDataset(sessions: VisitorSession[], orders: ShopifyOrde
 
   const now = new Date().toISOString();
   const push = (a: Omit<Anomaly, "shopId" | "detectedAt">) =>
-    anomalies.push({ ...a, shopId: "shop_demo_01", detectedAt: now });
+    anomalies.push({ ...a, shopId, detectedAt: now });
 
   const lostPaymentRevenue = outOfPeriodPaymentSessions.reduce(
     (acc, s) => acc + (s.events.find((e) => e.eventName === "payment_step_reached")?.price ?? 0),
     0
   );
+
+  const todaySessions = sessions.filter((s) => dayOffsetOf(s.startedAt) === 0);
+  const todayAtc = todaySessions.filter((s) =>
+    s.events.some((e) => e.eventName === "product_added_to_cart")
+  ).length;
+  const todayPayments = todaySessions.filter((s) =>
+    s.events.some((e) => e.eventName === "payment_step_reached")
+  ).length;
 
   if (outOfPeriodPaymentSessions.length > 0) {
     push({
@@ -117,7 +129,7 @@ export function reconcileDataset(sessions: VisitorSession[], orders: ShopifyOrde
       type: "payment_without_add_to_cart",
       severity: "high",
       title: "Paiements atteints sans ajout panier sur la période",
-      description: `${outOfPeriodPaymentSessions.length} sessions ont atteint l'étape paiement aujourd'hui sans ajout panier observé sur la même période. C'est la cause de l'écart « ${outOfPeriodPaymentSessions.length + 1} paiements atteints pour 2 ajouts panier » visible dans Shopify Analytics.`,
+      description: `${outOfPeriodPaymentSessions.length} sessions ont atteint l'étape paiement aujourd'hui sans ajout panier observé sur la même période. C'est la cause de l'écart « ${todayPayments} paiements atteints pour ${todayAtc} ajouts panier » visible dans Shopify Analytics.`,
       affectedSessions: outOfPeriodPaymentSessions.length,
       affectedRevenue: Math.round(lostPaymentRevenue * 100) / 100,
       probableCause: "Paniers créés avant la période, checkouts repris via email/retargeting, ou panier constitué sur un autre appareil.",
@@ -179,14 +191,21 @@ export function reconcileDataset(sessions: VisitorSession[], orders: ShopifyOrde
   }
 
   if (missingUtmSessions.length > 0) {
+    const missingUtmSessionIds = new Set(missingUtmSessions.map((s) => s.id));
+    const missingUtmOrders = orders.filter((o) => o.sessionId && missingUtmSessionIds.has(o.sessionId));
+    const missingUtmRevenue = missingUtmOrders.reduce((a, o) => a + o.totalPrice, 0);
     push({
       id: "ano_missing_utm",
       type: "missing_utm",
       severity: "medium",
       title: "Trafic payé probable sans UTM",
-      description: `${missingUtmSessions.length} sessions sur 7 jours arrivent depuis un référent publicitaire (Facebook, Instagram, TikTok) sans paramètres UTM. Leur source est classée « inconnue », dont 1 session avec achat confirmé.`,
+      description: `${missingUtmSessions.length} sessions sur 7 jours arrivent depuis un référent publicitaire (Facebook, Instagram, TikTok) sans paramètres UTM. Leur source est classée « inconnue »${
+        missingUtmOrders.length > 0
+          ? `, dont ${missingUtmOrders.length} session${missingUtmOrders.length > 1 ? "s" : ""} avec achat confirmé`
+          : ""
+      }.`,
       affectedSessions: missingUtmSessions.length,
-      affectedRevenue: 99.0,
+      affectedRevenue: missingUtmRevenue > 0 ? missingUtmRevenue : undefined,
       probableCause: "UTM absents ou tronqués sur certaines publicités (liens bio, stories, boutons in-app).",
       recommendedAction: "Ajouter des UTM systématiques sur toutes les campagnes Meta/TikTok, y compris les liens organiques de profil.",
     });

@@ -7,7 +7,8 @@ import { InsightCard } from "@/components/domain/InsightCard";
 import { ReliabilityPanel } from "@/components/domain/ReliabilityPanel";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
-import { getDataset } from "@/data/dataset";
+import { LiveEmptyState } from "@/components/domain/LiveEmptyState";
+import { getActiveDataset } from "@/lib/server/datasource";
 import {
   computeRawFunnel,
   computeVerifiedFunnel,
@@ -26,7 +27,10 @@ export default async function DashboardPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const period = parsePeriod((await searchParams).period);
-  const dataset = getDataset();
+  const { dataset, mode, status, liveEmpty } = await getActiveDataset();
+  if (mode === "live" && liveEmpty) {
+    return <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />;
+  }
   const sessions = sessionsInPeriod(dataset.sessions, period);
   const orders = ordersInPeriod(dataset.orders, period);
   const raw = computeRawFunnel(sessions);

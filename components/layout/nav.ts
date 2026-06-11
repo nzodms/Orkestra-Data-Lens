@@ -39,4 +39,5 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/sources": { title: "Sources", subtitle: "Qualité réelle de chaque canal d'acquisition" },
   "/anomalies": { title: "Anomalies", subtitle: "Les écarts expliqués au lieu d'être cachés" },
   "/settings": { title: "Paramètres", subtitle: "Connexion, tracking et préférences" },
+  "/system": { title: "Diagnostic système", subtitle: "État de l'installation OAuth, base, sync et tracking" },
 };

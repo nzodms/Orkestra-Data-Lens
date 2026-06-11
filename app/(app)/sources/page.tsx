@@ -2,7 +2,8 @@ import { Lightbulb, Link2Off } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { getDataset } from "@/data/dataset";
+import { LiveEmptyState } from "@/components/domain/LiveEmptyState";
+import { getActiveDataset } from "@/lib/server/datasource";
 import { computeSourceStats } from "@/lib/analytics";
 import { parsePeriod, PERIOD_LABELS } from "@/lib/funnel";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
@@ -13,7 +14,10 @@ export default async function SourcesPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const period = parsePeriod((await searchParams).period);
-  const dataset = getDataset();
+  const { dataset, mode, status, liveEmpty } = await getActiveDataset();
+  if (mode === "live" && liveEmpty) {
+    return <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />;
+  }
   const stats = computeSourceStats(dataset, period);
   const insights = stats.filter((s) => s.insight);
   const missingUtm = dataset.anomalies.find((a) => a.type === "missing_utm");

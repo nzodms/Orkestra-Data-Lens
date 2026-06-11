@@ -23,6 +23,22 @@ npm run dev
 
 Ouvre [http://localhost:3000](http://localhost:3000). L'app démarre en **mode démo** avec un jeu de données déterministe (boutique de luminaires, 7 jours d'historique, ~1 000 sessions) qui reproduit exactement le scénario ci-dessus pour « aujourd'hui ».
 
+## Passer en mode live (V1)
+
+1. Copier `.env.example` vers `.env` et renseigner :
+   - `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` (app du Partner Dashboard) ;
+   - `SHOPIFY_APP_URL` (URL publique, callback `…/api/shopify/callback`) ;
+   - `DATABASE_URL` (PostgreSQL — Supabase ou autre) ;
+   - `ENCRYPTION_SECRET` (32+ caractères, `openssl rand -hex 32`).
+2. `npm run db:migrate` — crée les 13 tables (shops, tokens, products, variants, customers, orders, line items, refunds, sessions, events, anomalies, sync_runs, webhook_deliveries).
+3. Aller dans `/onboarding`, saisir le domaine `*.myshopify.com` → OAuth réel (state anti-CSRF signé, HMAC vérifié, token chiffré AES-256-GCM, webhooks enregistrés automatiquement).
+4. La synchronisation initiale (30 jours, extensible à 90) importe produits, variantes, commandes, lignes et remboursements — relançable depuis Paramètres.
+5. Déployer le Web Pixel (`extensions/orkestra-pixel`, voir son README) : les événements arrivent sur `/api/tracking/event` (validation zod, anti-spam, déduplication) avec le statut `observed` et ne deviennent `confirmed` qu'une fois réconciliés avec une commande Shopify réelle.
+
+L'interface affiche en permanence le mode actif (« Mode démo » / « Données live » / « Synchronisation en cours » / « Pixel non installé ») — jamais de mélange silencieux entre données simulées et réelles. La page `/system` (liée depuis Paramètres) vérifie toute l'installation : env, base, migrations, boutique, token, scopes, sync, tracking, HMAC webhook et moteur de réconciliation.
+
+`npm run db:seed-demo` injecte le jeu de démonstration dans PostgreSQL (boutique `is_demo`) pour tester le pipeline base → réconciliation sans boutique réelle.
+
 ## Pages
 
 | Route | Rôle |
@@ -41,15 +57,29 @@ Ouvre [http://localhost:3000](http://localhost:3000). L'app démarre en **mode d
 
 ```
 app/            Pages (App Router) + routes API
-  api/          shopify/auth · shopify/callback · shopify/sync ·
-                webhooks/orders · webhooks/refunds · tracking/event · export
-components/     layout/ (sidebar, topbar, bottom nav) · ui/ · domain/ · charts/
+  api/          shopify/auth · shopify/callback · shopify/sync (réels) ·
+                webhooks/{orders,refunds,app-uninstalled,RGPD ×3} (HMAC + dédup) ·
+                tracking/event (ingestion pixel) · export
+components/     layout/ (sidebar, topbar, bottom nav) · ui/ · domain/ · charts/ · onboarding/
 lib/            types.ts · funnel.ts (brut vs cohorte) · reconciliation.ts (règles 1-6)
                 scoring.ts (fiabilité) · analytics.ts (produits/sources/abandons)
                 insights.ts (commentaires basés sur les données) · discrepancies.ts
+  server/       env · db (pool pg) · crypto (AES-256-GCM, state signé, masquage email)
+                shopify (OAuth, HMAC, GraphQL paginé + REST commandes, webhooks)
+                repo (upserts SQL) · sync (30/90 j) · datasource (bascule démo/live)
+                webhooks (pipeline HMAC → dédup → traitement)
 data/           shop · products · heroSessions (13 sessions écrites à la main)
                 dataset.ts (générateur déterministe 7 jours + assemblage)
+db/migrations/  schéma SQL (idempotent) — scripts/migrate.mjs · scripts/seed-demo.ts
+extensions/     orkestra-pixel (Web Pixel Shopify → /api/tracking/event)
 ```
+
+En mode live, `lib/server/datasource.ts` reconstruit le même `Dataset` que la démo
+depuis PostgreSQL (sessions 7 j, commandes 30 j, enrichissement `cartCreatedAt`
+par cart_token, rattachement commande→session par order_id / checkout_token /
+cart_token), puis fait tourner **le même moteur de réconciliation** : funnel brut,
+funnel cohorte, anomalies, score de fiabilité et insights fonctionnent à
+l'identique sur données réelles.
 
 ### Logique de réconciliation (lib/reconciliation.ts)
 

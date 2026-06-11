@@ -1,32 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSignedState } from "@/lib/server/crypto";
+import { configIssues, isDatabaseConfigured, isOAuthConfigured } from "@/lib/server/env";
+import { buildAuthorizeUrl, normalizeShopDomain } from "@/lib/server/shopify";
 
 /**
  * Point d'entrée OAuth Shopify.
+ * GET /api/shopify/auth?shop=ma-boutique.myshopify.com
  *
- * TODO(prod) :
- *  1. Valider le paramètre `shop` (format *.myshopify.com).
- *  2. Générer un `state` anti-CSRF, le stocker (cookie signé ou Supabase).
- *  3. Rediriger vers
- *     https://{shop}/admin/oauth/authorize
- *       ?client_id=SHOPIFY_API_KEY
- *       &scope=read_products,read_orders,read_customers,read_checkouts,write_pixels
- *       &redirect_uri={APP_URL}/api/shopify/callback
- *       &state={state}
+ * Génère un state anti-CSRF signé (porté par un cookie HttpOnly) puis
+ * redirige vers la page d'autorisation Shopify.
  */
 export async function GET(req: NextRequest) {
-  const shopDomain = req.nextUrl.searchParams.get("shop");
+  const raw = req.nextUrl.searchParams.get("shop") ?? "";
+  const shopDomain = normalizeShopDomain(raw);
 
-  if (!shopDomain || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(shopDomain)) {
-    return NextResponse.json(
-      { error: "Paramètre `shop` manquant ou invalide (attendu : ma-boutique.myshopify.com)" },
-      { status: 400 }
+  if (!shopDomain) {
+    return NextResponse.redirect(
+      new URL(`/onboarding?step=1&error=invalid_shop`, req.nextUrl.origin)
     );
   }
 
-  return NextResponse.json({
-    mode: "demo",
-    message:
-      "OAuth Shopify non configuré dans cet environnement. En production, cette route redirige vers la page d'autorisation Shopify.",
-    wouldRedirectTo: `https://${shopDomain}/admin/oauth/authorize?...`,
+  if (!isOAuthConfigured() || !isDatabaseConfigured()) {
+    const missing = configIssues().map((i) => i.key).join(",");
+    return NextResponse.redirect(
+      new URL(`/onboarding?step=1&error=not_configured&missing=${encodeURIComponent(missing)}`, req.nextUrl.origin)
+    );
+  }
+
+  const state = createSignedState(shopDomain);
+  const response = NextResponse.redirect(buildAuthorizeUrl(shopDomain, state));
+  response.cookies.set("orkestra_oauth_state", state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    maxAge: 600,
+    path: "/",
   });
+  return response;
 }

@@ -11,7 +11,14 @@ const PERIODS = [
   { value: "7d", label: "7 jours" },
 ] as const;
 
-export default function Topbar() {
+export type TopbarStatus = {
+  mode: "demo" | "live";
+  syncRunning: boolean;
+  pixelInstalled: boolean;
+  lastDataLabel: string | null;
+};
+
+export default function Topbar({ status }: { status: TopbarStatus }) {
   const pathname = usePathname();
   const router = useRouter();
   const search = useSearchParams();
@@ -57,10 +64,30 @@ export default function Topbar() {
           ))}
         </div>
 
-        <span className="hidden items-center gap-1.5 rounded-full border border-warn/20 bg-warn-soft px-2.5 py-1 text-[11px] font-semibold text-warn sm:inline-flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-warn pulse-dot" />
-          Données simulées
-        </span>
+        {status.mode === "demo" ? (
+          <span className="hidden items-center gap-1.5 rounded-full border border-warn/20 bg-warn-soft px-2.5 py-1 text-[11px] font-semibold text-warn sm:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-warn pulse-dot" />
+            Mode démo — données simulées
+          </span>
+        ) : (
+          <span className="hidden items-center gap-2 sm:inline-flex">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-positive/20 bg-positive-soft px-2.5 py-1 text-[11px] font-semibold text-positive"
+              title={status.lastDataLabel ?? undefined}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-positive pulse-dot" />
+              {status.syncRunning ? "Synchronisation en cours" : "Données live"}
+            </span>
+            {!status.pixelInstalled && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-warn/20 bg-warn-soft px-2.5 py-1 text-[11px] font-semibold text-warn">
+                Pixel non installé
+              </span>
+            )}
+            {status.lastDataLabel && (
+              <span className="hidden text-[10.5px] text-ink-soft lg:inline">{status.lastDataLabel}</span>
+            )}
+          </span>
+        )}
       </div>
     </header>
   );
