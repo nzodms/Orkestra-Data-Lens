@@ -29,6 +29,14 @@ const EXPECTED_TABLES = [
   "anomalies",
   "sync_runs",
   "webhook_deliveries",
+  // Order Desk (migration 0003)
+  "suppliers",
+  "product_suppliers",
+  "supplier_quotes",
+  "supplier_messages",
+  "order_supplier_statuses",
+  "internal_notes",
+  "whatsapp_templates",
 ];
 
 async function runChecks(): Promise<Check[]> {

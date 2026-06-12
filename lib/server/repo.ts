@@ -258,6 +258,7 @@ export type ShopifyOrderPayload = {
   total_price?: string | number;
   currency?: string;
   financial_status?: string;
+  fulfillment_status?: string | null;
   cart_token?: string | null;
   checkout_token?: string | null;
   source_name?: string | null;
@@ -317,13 +318,14 @@ export async function upsertOrderFromPayload(
 
   const order = await queryOne<{ id: string }>(
     `insert into orders (shop_id, shopify_order_id, order_number, created_at_shopify, processed_at, cancelled_at,
-        total_price, currency, financial_status, cart_token, checkout_token, customer_id,
+        total_price, currency, financial_status, fulfillment_status, cart_token, checkout_token, customer_id,
         source_name, referring_site, landing_site, country, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$17,$10,$11,$12,$13,$14,$15,$16, now())
      on conflict (shop_id, shopify_order_id) do update set
        order_number = excluded.order_number, processed_at = excluded.processed_at,
        cancelled_at = excluded.cancelled_at, total_price = excluded.total_price,
        financial_status = excluded.financial_status,
+       fulfillment_status = excluded.fulfillment_status,
        cart_token = coalesce(excluded.cart_token, orders.cart_token),
        checkout_token = coalesce(excluded.checkout_token, orders.checkout_token),
        customer_id = coalesce(excluded.customer_id, orders.customer_id),
@@ -350,6 +352,7 @@ export async function upsertOrderFromPayload(
       payload.referring_site ?? null,
       payload.landing_site ?? null,
       payload.shipping_address?.country_code ?? payload.customer?.default_address?.country_code ?? null,
+      payload.fulfillment_status ?? null,
     ]
   );
 

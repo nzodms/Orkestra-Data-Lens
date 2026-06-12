@@ -1,5 +1,71 @@
 # Changelog — Orkestra Data Lens
 
+## [0.4.0] — Partie 2 : module Order Desk (commandes, fournisseurs, WhatsApp V1)
+
+### Nouveau module Order Desk (sidebar : Commandes · Fournisseurs · Messages)
+- **Page Commandes** branchée sur les commandes Shopify déjà synchronisées en
+  base (mode live) ou sur les commandes du dataset démo : numéro, date, client
+  masqué, pays, produits/variantes/quantités, prix client, statut paiement et
+  fulfillment Shopify, **marge estimée** (vs meilleure offre fournisseur),
+  fournisseur choisi, tracking et **prochaine action**.
+- **11 statuts opérationnels** (À traiter → Recherche fournisseur → Prix à
+  comparer → Fournisseur choisi → Message envoyé → Paiement fournisseur en
+  attente → Commandé → Tracking en attente → Expédiée / Problème / SAV).
+- **Vue Kanban** (8 colonnes) avec cartes commande (produit, prix, marge,
+  fournisseur, retard, prochaine action) + **vue Table** filtrable (statut,
+  fournisseur, pays, produit, non assigné, recherche).
+- **Drawer commande premium** : résumé Shopify, line items, statut + actions
+  rapides (paiement en attente, commandé, tracking, expédié, problème),
+  comparaison fournisseurs, messages, tracking, notes internes.
+- **Section « À faire maintenant »** : commandes sans fournisseur,
+  fournisseurs à relancer (2 j+ sans réponse), paiements fournisseur en
+  attente, commandes sans tracking, produits à re-sourcer (marge < 40 %),
+  problèmes — chaque carte filtre la vue.
+
+### Fournisseurs
+- **Page Fournisseurs** : contact WhatsApp/email/site, pays, devise, délai
+  moyen, fiabilité (score visuel), commandes, taux de problème, dernier
+  contact, tags (rapide, fiable, cher, bon prix, fragile, à éviter).
+- **Fiche fournisseur en drawer** : infos, produits associés (offres), 
+  commandes liées, prix proposés, messages envoyés, notes internes,
+  formulaire d'ajout/édition complet.
+- **Association produit → fournisseurs** : prix produit, livraison, délai,
+  MOQ, stock, lien produit, fournisseur préféré.
+
+### Comparaison fournisseurs
+- Depuis chaque commande : tableau fournisseur / prix produit / livraison /
+  total / délai / stock / MOQ / fiabilité / **marge estimée** / **score
+  recommandé** (prix 45 %, délai 25 %, fiabilité 30 %).
+- Badges Meilleur prix / Plus rapide / **Recommandé** / À éviter (fiabilité
+  < 65) + recommandation en clair : « Fournisseur recommandé : X — prix
+  total …, délai …, marge estimée …, fiabilité …/100 » + bouton « Choisir ».
+
+### WhatsApp V1 (sans API — architecture prête pour la Cloud API V2)
+- **7 templates** (prix/dispo, délai, confirmation commande, tracking,
+  relance, problème produit, prix volume) avec variables `{{product_name}}`,
+  `{{quantity}}`, `{{country}}`… pré-remplies depuis la commande.
+- Ouverture **WhatsApp Web / wa.me** avec message pré-rempli — aucun envoi
+  automatique ; statut suivi dans Orkestra : préparé → envoyé manuellement →
+  réponse reçue → prix renseigné → fournisseur retenu.
+- **Multi-fournisseurs** : sélection de plusieurs fournisseurs, un message
+  généré par fournisseur, ouverture WhatsApp individuelle, suivi par statut.
+- **Page Messages** : historique filtrable, relance, saisie des prix/délais
+  reçus (crée un devis + met à jour l'offre produit), « retenir ce
+  fournisseur » (assigne aussi la commande).
+
+### Technique
+- Migration `0003_order_desk.sql` (idempotente) : `suppliers`,
+  `product_suppliers`, `supplier_quotes`, `supplier_messages`,
+  `order_supplier_statuses`, `internal_notes`, `whatsapp_templates` +
+  colonne `fulfillment_status` sur `orders` (alimentée par sync/webhooks).
+- API `POST /api/orderdesk/action` (10 actions validées zod) — même contrat
+  en démo (store mémoire mutable, non persisté) et en live (PostgreSQL).
+- Données démo réalistes : 6 fournisseurs (Chine/HK/UE), 19 offres produit,
+  devis, messages, statuts répartis sur tout le cycle.
+- `/system` vérifie désormais les 20 tables. Aucune page Data Lens modifiée.
+
+---
+
 ## [0.3.0] — Partie 1 : activation automatique du pixel + refonte liquid glass
 
 ### Pixel Shopify (activation automatique)

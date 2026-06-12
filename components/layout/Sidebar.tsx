@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS } from "./nav";
+import { NAV_ITEMS, NAV_SECTION_LABELS, type NavSection } from "./nav";
 
 export default function Sidebar({
   anomalyCount,
@@ -35,10 +35,18 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-0.5 px-3">
-        {NAV_ITEMS.map((item) => {
-          const active = pathname.startsWith(item.href);
-          const Icon = item.icon;
-          return (
+        {(["datalens", "orderdesk", "config"] as NavSection[]).map((section) => (
+          <div key={section} className={cn(section !== "datalens" && "pt-3")}>
+            {NAV_SECTION_LABELS[section] && (
+              <div className="px-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.16em] text-ink-soft/70">
+                {NAV_SECTION_LABELS[section]}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {NAV_ITEMS.filter((i) => i.section === section).map((item) => {
+                const active = pathname.startsWith(item.href);
+                const Icon = item.icon;
+                return (
             <Link
               key={item.href}
               href={`${item.href}${qs}`}
@@ -60,9 +68,12 @@ export default function Sidebar({
                   {anomalyCount}
                 </span>
               )}
-            </Link>
-          );
-        })}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="inset-panel m-3 p-3">
