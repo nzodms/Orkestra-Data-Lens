@@ -49,13 +49,14 @@ export type KanbanColumn = {
 };
 
 export const KANBAN_COLUMNS: KanbanColumn[] = [
-  { key: "todo", label: "À traiter", statuses: ["todo"], tone: "red" },
-  { key: "sourcing", label: "Recherche fournisseur", statuses: ["sourcing", "price_compare"], tone: "orange" },
-  { key: "waiting", label: "En attente fournisseur", statuses: ["supplier_chosen", "message_sent"], tone: "blue" },
+  { key: "todo", label: "Nouvelle commande", statuses: ["todo"], tone: "red" },
+  { key: "sourcing", label: "À sourcer", statuses: ["sourcing"], tone: "orange" },
+  { key: "contacted", label: "Fournisseur contacté", statuses: ["message_sent"], tone: "blue" },
+  { key: "priced", label: "Prix reçu", statuses: ["price_compare"], tone: "violet" },
+  { key: "chosen", label: "Fournisseur choisi", statuses: ["supplier_chosen"], tone: "blue" },
   { key: "payment", label: "Paiement fournisseur", statuses: ["payment_pending"], tone: "violet" },
-  { key: "ordered", label: "Commandé", statuses: ["ordered"], tone: "blue" },
-  { key: "tracking", label: "Tracking", statuses: ["tracking_pending"], tone: "orange" },
-  { key: "shipped", label: "Expédié", statuses: ["shipped"], tone: "green" },
+  { key: "tracking", label: "Tracking attendu", statuses: ["ordered", "tracking_pending"], tone: "orange" },
+  { key: "shipped", label: "Expédiée", statuses: ["shipped"], tone: "green" },
   { key: "problem", label: "Problème", statuses: ["problem", "sav"], tone: "red" },
 ];
 
@@ -200,6 +201,7 @@ export type DeskData = {
   quotes: SupplierQuote[];
   messages: SupplierMessage[];
   notes: InternalNote[];
+  activities: import("@/lib/activity").ActivityLog[];
 };
 
 // ─── Helpers dérivés ──────────────────────────────────────────────────────────

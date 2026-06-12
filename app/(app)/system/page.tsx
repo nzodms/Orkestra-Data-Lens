@@ -1,204 +1,18 @@
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleSlash, Stethoscope, TriangleAlert, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleSlash, Download, HeartPulse, Stethoscope, TriangleAlert, XCircle } from "lucide-react";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { getDataset } from "@/data/dataset";
-import { computeRawFunnel, computeVerifiedFunnel, sessionsInPeriod } from "@/lib/funnel";
-import { pingDb, query } from "@/lib/server/db";
-import { configIssues, env, isDatabaseConfigured, isOAuthConfigured } from "@/lib/server/env";
-import { getAccessToken, getConnectedShop, getLastSyncRun, getShopStats } from "@/lib/server/repo";
-import { verifyWebhookHmac } from "@/lib/server/shopify";
-import { createHmac } from "node:crypto";
+import { ProgressBar } from "@/components/ui/ProgressBar";
+import { ScoreRing } from "@/components/ui/ScoreRing";
+import { PixelButton } from "@/components/domain/PixelButton";
+import { SyncButton } from "@/components/domain/SyncButton";
+import { TestTrackingButton } from "@/components/domain/TestTrackingButton";
+import { getActiveDataset } from "@/lib/server/datasource";
+import { computeDataHealth, runChecks, type CheckStatus } from "@/lib/server/diagnostics";
+import { isOAuthConfigured } from "@/lib/server/env";
+import { formatDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-
-type CheckStatus = "ok" | "warn" | "fail" | "skip";
-type Check = { name: string; status: CheckStatus; detail: string };
-
-const EXPECTED_TABLES = [
-  "shops",
-  "shopify_tokens",
-  "products",
-  "product_variants",
-  "customers",
-  "orders",
-  "order_line_items",
-  "refunds",
-  "visitor_sessions",
-  "tracking_events",
-  "anomalies",
-  "sync_runs",
-  "webhook_deliveries",
-  // Order Desk (migration 0003)
-  "suppliers",
-  "product_suppliers",
-  "supplier_quotes",
-  "supplier_messages",
-  "order_supplier_statuses",
-  "internal_notes",
-  "whatsapp_templates",
-];
-
-async function runChecks(): Promise<Check[]> {
-  const checks: Check[] = [];
-  const issues = configIssues();
-
-  // 1. Configuration OAuth
-  const oauthIssues = issues.filter((i) => i.key.startsWith("SHOPIFY") || i.key === "ENCRYPTION_SECRET");
-  checks.push(
-    oauthIssues.length === 0
-      ? { name: "Configuration OAuth Shopify", status: "ok", detail: `Scopes demandés : ${env.shopifyScopes}` }
-      : {
-          name: "Configuration OAuth Shopify",
-          status: "fail",
-          detail: `Variables manquantes : ${oauthIssues.map((i) => i.key).join(", ")}`,
-        }
-  );
-
-  // 2-3. Base de données
-  if (!isDatabaseConfigured()) {
-    checks.push({ name: "Base de données", status: "fail", detail: "DATABASE_URL non configuré" });
-  } else if (!(await pingDb())) {
-    checks.push({ name: "Base de données", status: "fail", detail: "Connexion impossible (vérifier DATABASE_URL / réseau)" });
-  } else {
-    checks.push({ name: "Base de données", status: "ok", detail: "Connexion PostgreSQL établie" });
-
-    // 4. Migrations
-    try {
-      const rows = await query<{ table_name: string }>(
-        `select table_name from information_schema.tables where table_schema = 'public'`
-      );
-      const present = new Set(rows.map((r) => r.table_name));
-      const missing = EXPECTED_TABLES.filter((t) => !present.has(t));
-      checks.push(
-        missing.length === 0
-          ? { name: "Migrations", status: "ok", detail: `${EXPECTED_TABLES.length} tables présentes` }
-          : { name: "Migrations", status: "fail", detail: `Tables manquantes : ${missing.join(", ")} — lancer npm run db:migrate` }
-      );
-    } catch (err) {
-      checks.push({ name: "Migrations", status: "fail", detail: err instanceof Error ? err.message : "Erreur inconnue" });
-    }
-
-    // 5-8. Boutique, token, scopes, sync
-    try {
-      const shop = await getConnectedShop();
-      if (!shop) {
-        checks.push({ name: "Boutique connectée", status: "warn", detail: "Aucune boutique live — mode démo actif" });
-        checks.push({ name: "Token Shopify", status: "skip", detail: "Pas de boutique connectée" });
-        checks.push({ name: "Scopes", status: "skip", detail: "Pas de boutique connectée" });
-        checks.push({ name: "Synchronisation", status: "skip", detail: "Pas de boutique connectée" });
-        checks.push({ name: "Tracking", status: "skip", detail: "Pas de boutique connectée" });
-        checks.push({ name: "Web Pixel", status: "skip", detail: "Pas de boutique connectée" });
-      } else {
-        checks.push({ name: "Boutique connectée", status: "ok", detail: shop.shopify_domain });
-
-        const token = await getAccessToken(shop.id);
-        checks.push(
-          token
-            ? { name: "Token Shopify", status: "ok", detail: "Présent et déchiffrable (AES-256-GCM)" }
-            : { name: "Token Shopify", status: "fail", detail: "Token manquant ou indéchiffrable — reconnecter la boutique" }
-        );
-
-        const requested = env.shopifyScopes.split(",").map((s) => s.trim());
-        const installed = (shop.installed_scopes ?? "").split(",").map((s) => s.trim());
-        const missingScopes = requested.filter((s) => s && !installed.includes(s));
-        checks.push(
-          missingScopes.length === 0
-            ? { name: "Scopes", status: "ok", detail: installed.join(", ") || "—" }
-            : { name: "Scopes", status: "warn", detail: `Non accordés : ${missingScopes.join(", ")}` }
-        );
-
-        const [lastSync, stats] = await Promise.all([getLastSyncRun(shop.id), getShopStats(shop.id)]);
-        if (!lastSync) {
-          checks.push({ name: "Synchronisation", status: "warn", detail: "Jamais lancée — utiliser le bouton dans Paramètres" });
-        } else if (lastSync.status === "error") {
-          checks.push({ name: "Synchronisation", status: "fail", detail: lastSync.error_message ?? "Dernière sync en erreur" });
-        } else {
-          checks.push({
-            name: "Synchronisation",
-            status: "ok",
-            detail: `${stats.products} produits, ${stats.orders} commandes, ${stats.refunds} remboursements en base`,
-          });
-        }
-
-        checks.push(
-          stats.events > 0
-            ? { name: "Tracking", status: "ok", detail: `${stats.events} événements reçus (${stats.sessions} sessions), dernier : ${stats.lastEventAt ?? "—"}` }
-            : { name: "Tracking", status: "warn", detail: "Aucun événement reçu sur /api/tracking/event — déployer/activer le pixel" }
-        );
-
-        if (shop.pixel_status === "installed") {
-          checks.push({
-            name: "Web Pixel",
-            status: "ok",
-            detail: `Pixel installé${shop.web_pixel_id ? ` (${shop.web_pixel_id})` : ""}`,
-          });
-        } else if (shop.pixel_status === "installing") {
-          checks.push({ name: "Web Pixel", status: "warn", detail: "Installation en cours" });
-        } else if (shop.pixel_status === "error") {
-          checks.push({
-            name: "Web Pixel",
-            status: "fail",
-            detail: `Erreur d'installation : ${shop.pixel_error ?? "inconnue"} — bouton « Réinstaller le pixel » dans Paramètres`,
-          });
-        } else {
-          checks.push({
-            name: "Web Pixel",
-            status: "warn",
-            detail: "Pixel non installé — il sera créé automatiquement à la prochaine connexion OAuth, ou via Paramètres",
-          });
-        }
-      }
-    } catch (err) {
-      checks.push({ name: "Boutique connectée", status: "fail", detail: err instanceof Error ? err.message : "Erreur inconnue" });
-    }
-  }
-
-  // 9. Auto-test HMAC webhook
-  if (env.shopifyApiSecret) {
-    const sample = JSON.stringify({ test: true, at: Date.now() });
-    const digest = createHmac("sha256", env.shopifyApiSecret).update(sample, "utf8").digest("base64");
-    checks.push(
-      verifyWebhookHmac(sample, digest) && !verifyWebhookHmac(sample, "invalide")
-        ? { name: "Vérification HMAC webhook", status: "ok", detail: "Signature valide acceptée, signature invalide rejetée" }
-        : { name: "Vérification HMAC webhook", status: "fail", detail: "L'auto-test HMAC a échoué" }
-    );
-  } else {
-    checks.push({ name: "Vérification HMAC webhook", status: "skip", detail: "SHOPIFY_API_SECRET manquant" });
-  }
-
-  // 10. Auto-test du moteur de réconciliation (sur le jeu de démo)
-  try {
-    const demo = getDataset();
-    const today = sessionsInPeriod(demo.sessions, "today");
-    const raw = computeRawFunnel(today);
-    const verified = computeVerifiedFunnel(today, demo.orders, "today");
-    const ok =
-      raw.sessions === 155 &&
-      raw.addToCarts === 2 &&
-      raw.paymentReached === 5 &&
-      verified.outOfCohortPayments === 4 &&
-      verified.confirmedOrders === 1 &&
-      demo.anomalies.length >= 4;
-    checks.push(
-      ok
-        ? {
-            name: "Moteur de réconciliation",
-            status: "ok",
-            detail: "Scénario de référence vérifié : 155 sessions, 2 ajouts panier, 5 paiements dont 4 hors cohorte, 1 commande",
-          }
-        : {
-            name: "Moteur de réconciliation",
-            status: "fail",
-            detail: `Valeurs inattendues : sessions=${raw.sessions}, atc=${raw.addToCarts}, paiements=${raw.paymentReached}, horsCohorte=${verified.outOfCohortPayments}`,
-          }
-    );
-  } catch (err) {
-    checks.push({ name: "Moteur de réconciliation", status: "fail", detail: err instanceof Error ? err.message : "Erreur inconnue" });
-  }
-
-  return checks;
-}
 
 const STATUS_UI: Record<CheckStatus, { icon: typeof CheckCircle2; tone: "green" | "orange" | "red" | "neutral"; label: string; color: string }> = {
   ok: { icon: CheckCircle2, tone: "green", label: "OK", color: "text-positive" },
@@ -208,37 +22,86 @@ const STATUS_UI: Record<CheckStatus, { icon: typeof CheckCircle2; tone: "green" 
 };
 
 export default async function SystemPage() {
-  const checks = await runChecks();
+  const [{ dataset, mode, status }, checks] = await Promise.all([getActiveDataset(), runChecks()]);
+  const health = await computeDataHealth(dataset, status);
   const failures = checks.filter((c) => c.status === "fail").length;
   const warnings = checks.filter((c) => c.status === "warn").length;
   const oauthReady = isOAuthConfigured();
+  const live = mode === "live";
+
+  const colorFor = (v: number) =>
+    v >= 85 ? "var(--color-positive)" : v >= 60 ? "var(--color-warn)" : "var(--color-critical)";
 
   return (
     <div className="space-y-4">
-      <Card className="flex items-start gap-3.5">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
-          <Stethoscope size={18} />
-        </span>
-        <div className="flex-1">
-          <h2 className="text-[14.5px] font-semibold tracking-tight">Diagnostic système</h2>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-            Vérification complète de l&apos;installation : OAuth, base de données, boutique, token, scopes,
-            synchronisation, tracking, webhooks et moteur de réconciliation.
-          </p>
+      {/* Data Health Score */}
+      <Card>
+        <div className="flex flex-wrap items-start gap-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+            <HeartPulse size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-[15px] font-semibold tracking-tight">Data Health Score</h2>
+              {live ? <Badge tone="green">Données live</Badge> : <Badge tone="orange">Mode démo</Badge>}
+            </div>
+            <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-soft">
+              Fiabilité globale du pipeline : pixel, webhooks, commandes, sessions, réconciliation, UTM et anomalies.
+              {health.lastOrderAt && ` Dernière commande reçue : ${formatDateTime(health.lastOrderAt)}.`}
+            </p>
+          </div>
+          <ScoreRing value={health.globalScore} size={84} label="/100" />
         </div>
-        <Badge tone={failures > 0 ? "red" : warnings > 0 ? "orange" : "green"}>
-          {failures > 0 ? `${failures} échec${failures > 1 ? "s" : ""}` : warnings > 0 ? `${warnings} avertissement${warnings > 1 ? "s" : ""}` : "Tout est opérationnel"}
-        </Badge>
+        <div className="mt-4 grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+          {health.components.map((c) => (
+            <div key={c.label}>
+              <div className="mb-0.5 flex items-baseline justify-between">
+                <span className="text-[11.5px] font-medium">{c.label}</span>
+                <span className="num text-[11.5px] font-semibold">{c.value}%</span>
+              </div>
+              <ProgressBar value={c.value} color={colorFor(c.value)} height={5} />
+              <div className="mt-0.5 truncate text-[10.5px] text-ink-soft" title={c.detail}>
+                {c.detail}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap items-start gap-2 border-t border-ink/5 pt-3.5">
+          <TestTrackingButton />
+          {live && <PixelButton installed={status.pixelStatus === "installed"} />}
+          {live && <SyncButton rangeDays={30} />}
+          <a
+            href="/api/export?type=diagnostic&format=json"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12.5px] font-semibold shadow-sm transition-colors hover:bg-white"
+          >
+            <Download size={14} /> Exporter diagnostic
+          </a>
+        </div>
       </Card>
 
+      {/* Vérifications détaillées */}
       <Card>
-        <CardTitle>Résultats ({checks.length} vérifications)</CardTitle>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink/5 text-ink-soft">
+            <Stethoscope size={15} />
+          </span>
+          <h2 className="text-[14.5px] font-semibold tracking-tight">Vérifications ({checks.length})</h2>
+          <span className="ml-auto">
+            <Badge tone={failures > 0 ? "red" : warnings > 0 ? "orange" : "green"}>
+              {failures > 0
+                ? `${failures} échec${failures > 1 ? "s" : ""}`
+                : warnings > 0
+                  ? `${warnings} avertissement${warnings > 1 ? "s" : ""}`
+                  : "Tout est opérationnel"}
+            </Badge>
+          </span>
+        </div>
         <div className="space-y-2">
           {checks.map((check) => {
             const ui = STATUS_UI[check.status];
             const Icon = ui.icon;
             return (
-              <div key={check.name} className="flex items-start gap-3 rounded-xl border border-gray-200/70 bg-gray-50/60 px-3.5 py-2.5">
+              <div key={check.name} className="inset-panel flex items-start gap-3 px-3.5 py-2.5">
                 <Icon size={16} className={`mt-0.5 shrink-0 ${ui.color}`} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[12.5px] font-semibold">{check.name}</div>
@@ -250,10 +113,10 @@ export default async function SystemPage() {
           })}
         </div>
         {!oauthReady && (
-          <p className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-[12px] leading-relaxed text-ink-soft">
-            Pour passer en mode live : copier <code className="rounded bg-gray-100 px-1 text-[11px]">.env.example</code> vers{" "}
-            <code className="rounded bg-gray-100 px-1 text-[11px]">.env</code>, renseigner les variables, lancer{" "}
-            <code className="rounded bg-gray-100 px-1 text-[11px]">npm run db:migrate</code>, puis connecter la boutique
+          <p className="mt-3 rounded-xl bg-ink/[0.03] px-3 py-2 text-[12px] leading-relaxed text-ink-soft">
+            Pour passer en mode live : copier <code className="rounded bg-ink/5 px-1 text-[11px]">.env.example</code> vers{" "}
+            <code className="rounded bg-ink/5 px-1 text-[11px]">.env</code>, renseigner les variables, lancer{" "}
+            <code className="rounded bg-ink/5 px-1 text-[11px]">npm run db:migrate</code>, puis connecter la boutique
             depuis l&apos;onboarding.
           </p>
         )}

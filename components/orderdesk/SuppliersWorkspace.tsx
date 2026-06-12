@@ -7,10 +7,21 @@ import { Drawer } from "@/components/ui/Drawer";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useDeskAction } from "./useDeskAction";
 import { statusTone } from "./OrderDrawer";
+import { computeSupplierInsights, type SupplierBadge } from "@/lib/orderdesk/supplierScore";
 import { waLink } from "@/lib/orderdesk/templates";
 import type { DeskData, Supplier, SupplierTag } from "@/lib/orderdesk/types";
 import { MESSAGE_STATUS_LABELS, OPS_STATUS_LABELS } from "@/lib/orderdesk/types";
 import { cn, formatDate, formatDateTime, formatEUR } from "@/lib/utils";
+
+const INSIGHT_BADGE_TONES: Record<SupplierBadge, BadgeTone> = {
+  "Meilleur prix": "green",
+  "Plus rapide": "blue",
+  Fiable: "green",
+  Lent: "orange",
+  "À éviter": "red",
+  "Nouveau fournisseur": "violet",
+  "À tester": "neutral",
+};
 
 const TAG_TONES: Record<SupplierTag, BadgeTone> = {
   rapide: "blue",
@@ -69,6 +80,11 @@ export function SuppliersWorkspace({ data, mode }: { data: DeskData; mode: "demo
   const supplierNotes = useMemo(
     () => (selected ? data.notes.filter((n) => n.entityType === "supplier" && n.entityId === selected.id) : []),
     [selected, data.notes]
+  );
+  const insights = useMemo(() => (selected ? computeSupplierInsights(selected, data) : null), [selected, data]);
+  const supplierActivities = useMemo(
+    () => (selected ? (data.activities ?? []).filter((a) => a.entityId === selected.id).slice(0, 10) : []),
+    [selected, data.activities]
   );
 
   const openEdit = (s?: Supplier) => {
@@ -219,13 +235,30 @@ export function SuppliersWorkspace({ data, mode }: { data: DeskData; mode: "demo
         }
         width="max-w-2xl"
       >
-        {selected && (
+        {selected && insights && (
           <div className="space-y-4">
+            <div className="flex flex-wrap gap-1.5">
+              {insights.badges.map((b) => (
+                <Badge key={b} tone={INSIGHT_BADGE_TONES[b]}>
+                  {b}
+                </Badge>
+              ))}
+            </div>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-              <MiniStat label="Score fournisseur" value={`${selected.reliabilityScore}/100`} />
+              <MiniStat label="Score global" value={`${insights.globalScore}/100`} highlight />
+              <MiniStat label="Fiabilité" value={`${selected.reliabilityScore}/100`} />
               <MiniStat label="Commandes" value={String(selected.ordersCount)} />
-              <MiniStat label="Taux de problème" value={`${selected.problemRate}%`} />
-              <MiniStat label="Dernier contact" value={selected.lastContactAt ? formatDate(selected.lastContactAt) : "—"} />
+              <MiniStat label="En cours" value={String(insights.activeOrders)} />
+              <MiniStat label="Prix reçus" value={String(insights.quotesCount)} />
+              <MiniStat
+                label="Taux de réponse"
+                value={insights.messagesSent > 0 ? `${insights.responseRate}%` : "—"}
+              />
+              <MiniStat
+                label="Temps de réponse"
+                value={insights.avgResponseHours != null ? `${insights.avgResponseHours} h` : "—"}
+              />
+              <MiniStat label="Prix moyen" value={insights.avgPrice != null ? formatEUR(insights.avgPrice) : "—"} />
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -332,6 +365,27 @@ export function SuppliersWorkspace({ data, mode }: { data: DeskData; mode: "demo
                     </div>
                   ))}
                 </div>
+              </section>
+            )}
+
+            {/* Historique (journal) */}
+            {supplierActivities.length > 0 && (
+              <section>
+                <SectionTitle>Historique</SectionTitle>
+                <ol className="relative ml-1 space-y-2 border-l border-ink/8 pl-4">
+                  {supplierActivities.map((a) => (
+                    <li key={a.id} className="relative">
+                      <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand/60 ring-2 ring-white" />
+                      <div className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]">
+                        <span className="font-semibold">{a.title}</span>
+                        <span className="num ml-auto whitespace-nowrap text-[10.5px] text-ink-soft">
+                          {formatDateTime(a.createdAt)}
+                        </span>
+                      </div>
+                      {a.description && <p className="text-[11px] leading-snug text-ink-soft">{a.description}</p>}
+                    </li>
+                  ))}
+                </ol>
               </section>
             )}
 
@@ -448,11 +502,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="inset-panel p-2.5 text-center">
+    <div className={cn("inset-panel p-2.5 text-center", highlight && "ring-1 ring-brand/25")}>
       <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-soft">{label}</div>
-      <div className="num mt-0.5 text-[14px] font-semibold">{value}</div>
+      <div className={cn("num mt-0.5 text-[14px] font-semibold", highlight && "text-brand-strong")}>{value}</div>
     </div>
   );
 }

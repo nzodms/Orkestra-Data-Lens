@@ -13,6 +13,8 @@ import type {
   SupplierQuote,
   SupplierTag,
 } from "@/lib/orderdesk/types";
+import { describeDeskAction } from "@/lib/orderdesk/describe";
+import { getLiveActivities, logActivity } from "./activity";
 import { query, queryOne } from "./db";
 import { getAppStatus, type AppMode } from "./datasource";
 import { getConnectedShop } from "./repo";
@@ -222,16 +224,27 @@ async function buildLiveDeskData(shopId: string): Promise<DeskData> {
     createdAt: new Date(n.created_at).toISOString(),
   }));
 
-  return { orders, suppliers, offers, quotes, messages, notes };
+  const activities = await getLiveActivities(shopId);
+
+  return { orders, suppliers, offers, quotes, messages, notes, activities };
 }
 
 // ─── Actions (écriture) ───────────────────────────────────────────────────────
 
 export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean; mode: AppMode; id?: string }> {
   const status = await getAppStatus();
+
+  // Journalisation : décrite AVANT mutation (pour capturer l'état précédent)
+  const { data: snapshot } = await getDeskContext();
+  const activityEntry = describeDeskAction(action, snapshot);
+  const logIfOk = async <T extends { ok: boolean }>(result: T): Promise<T> => {
+    if (result.ok && activityEntry) await logActivity(activityEntry);
+    return result;
+  };
+
   if (status.mode === "demo") {
     const result = applyDemoDeskAction(action);
-    return { ...result, mode: "demo" };
+    return logIfOk({ ...result, mode: "demo" as const });
   }
   const shop = await getConnectedShop();
   if (!shop) return { ok: false, mode: "demo" };
@@ -252,7 +265,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
   switch (action.type) {
     case "set_status":
       await upsertState(action.orderId, "ops_status = $3", [action.status]);
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
 
     case "assign_supplier":
       await upsertState(
@@ -261,25 +274,25 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
          ops_status = case when ops_status in ('todo','sourcing','price_compare') then 'supplier_chosen' else ops_status end`,
         [action.supplierId, action.cost ?? null]
       );
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
 
     case "set_tracking":
       await upsertState(action.orderId, "tracking_number = $3, tracking_carrier = $4, ops_status = 'shipped'", [
         action.tracking,
         action.carrier ?? null,
       ]);
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
 
     case "report_problem":
       await upsertState(action.orderId, "ops_status = 'problem', problem_note = $3", [action.note]);
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
 
     case "add_note": {
       const row = await queryOne<{ id: string }>(
         `insert into internal_notes (shop_id, entity_type, entity_id, body) values ($1,$2,$3,$4) returning id`,
         [shopId, action.entityType, action.entityId, action.body]
       );
-      return { ok: true, mode: "live", id: row?.id };
+      return logIfOk({ ok: true, mode: "live" as const, id: row?.id });
     }
 
     case "record_message": {
@@ -300,7 +313,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
           []
         );
       }
-      return { ok: true, mode: "live", id: row?.id };
+      return logIfOk({ ok: true, mode: "live" as const, id: row?.id });
     }
 
     case "update_message":
@@ -312,7 +325,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
          where shop_id = $1 and id = $2`,
         [shopId, action.messageId, action.status]
       );
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
 
     case "add_quote": {
       const row = await queryOne<{ id: string }>(
@@ -345,7 +358,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
           [shopId, action.supplierId, action.productId, action.productPrice, action.shippingPrice, action.leadTimeDays ?? null]
         );
       }
-      return { ok: true, mode: "live", id: row?.id };
+      return logIfOk({ ok: true, mode: "live" as const, id: row?.id });
     }
 
     case "upsert_supplier": {
@@ -360,7 +373,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
           [shopId, s.id, s.name, s.whatsapp ?? null, s.email ?? null, s.website ?? null, s.country ?? null,
             s.currency ?? null, s.avgLeadTimeDays ?? null, s.reliabilityScore ?? null, s.notes ?? null, s.tags ?? null]
         );
-        return { ok: true, mode: "live", id: s.id };
+        return logIfOk({ ok: true, mode: "live" as const, id: s.id });
       }
       const row = await queryOne<{ id: string }>(
         `insert into suppliers (shop_id, name, whatsapp, email, website, country, currency, avg_lead_time_days, reliability_score, notes, tags)
@@ -370,7 +383,7 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
         [shopId, s.name, s.whatsapp ?? null, s.email ?? null, s.website ?? null, s.country ?? null,
           s.currency ?? null, s.avgLeadTimeDays ?? null, s.reliabilityScore ?? null, s.notes ?? null, s.tags ?? null]
       );
-      return { ok: true, mode: "live", id: row?.id };
+      return logIfOk({ ok: true, mode: "live" as const, id: row?.id });
     }
 
     case "add_offer":
@@ -384,6 +397,6 @@ export async function applyDeskAction(action: DeskAction): Promise<{ ok: boolean
         [shopId, action.supplierId, action.productId, action.productPrice, action.shippingPrice,
           action.leadTimeDays ?? null, action.moq ?? null, action.stock ?? null, action.productUrl ?? null, action.preferred ?? null]
       );
-      return { ok: true, mode: "live" };
+      return logIfOk({ ok: true, mode: "live" as const });
   }
 }

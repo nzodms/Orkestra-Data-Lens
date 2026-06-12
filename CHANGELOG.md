@@ -1,5 +1,82 @@
 # Changelog — Orkestra Data Lens
 
+## [0.5.0] — V1.5 : Daily Operations Cockpit
+
+### Cockpit « Aujourd'hui » (nouvelle page d'accueil)
+- Fusion Data Lens + Order Desk : **résumé narratif** calculé (« Aujourd'hui,
+  N actions nécessitent une décision… Pertes récupérables : X € »), 8 cartes
+  cliquables qui filtrent directement la vue concernée (commandes à traiter,
+  sans fournisseur, relances dues, sans tracking, à risque, marge faible,
+  anomalies critiques, pertes récupérables), bandeau santé (pixel, tracking,
+  dernière donnée) et activité récente.
+
+### Drag-and-drop Kanban
+- 9 colonnes (Nouvelle commande → À sourcer → Fournisseur contacté → Prix
+  reçu → Fournisseur choisi → Paiement fournisseur → Tracking attendu →
+  Expédiée → Problème), déplacement par glisser-déposer avec **optimistic
+  UI**, toast de confirmation et **journalisation automatique**.
+- Règles métier : fournisseur choisi sans fournisseur, paiement sans coût,
+  expédiée sans tracking → confirmation « Marquer comme fait malgré données
+  manquantes ». Cartes enrichies : client anonymisé, badges Urgent /
+  Problème / Tracking.
+
+### Journal d'actions (activity log)
+- Table `activity_logs` (migration 0005 → `0004_cockpit.sql`) + journal
+  démo en mémoire ; **toutes les actions Order Desk sont journalisées**
+  automatiquement (statut, fournisseur, prix reçu, message préparé/envoyé,
+  réponse, tracking, problème, note, fournisseur créé, alertes).
+- Affiché dans le drawer commande (« Historique »), le drawer fournisseur,
+  la page **/activity** (filtres par entité + export CSV/JSON) et le cockpit.
+
+### Alertes opérationnelles
+- Moteur d'alertes (`lib/alerts.ts`) recalculé en continu avec clés stables :
+  8 alertes commandes (sans fournisseur 24 h+, sans réponse 48 h, prix reçu
+  sans choix, choisi sans paiement, sans tracking 3 j+, marge < 40 %,
+  message préparé non envoyé…) + 7 alertes Data Lens (pixel inactif,
+  tracking silencieux 6 h+, pic hors cohorte, commandes sans session, UTM
+  manquants, ajout panier bas, abandon paiement haut).
+- Chaque alerte : priorité, cause, action recommandée, **bouton d'action**
+  et statut **active / snoozée 24 h / résolue** persisté
+  (table `operational_alerts` en live, mémoire en démo).
+
+### Fournisseurs & produits
+- **Fiche fournisseur enrichie** : score global pondéré (fiabilité 30 %,
+  prix 20 %, délai 20 %, taux de réponse 15 %, problèmes 15 %), taux et
+  temps moyen de réponse, prix moyen, prix reçus, commandes en cours,
+  badges calculés (Meilleur prix, Plus rapide, Fiable, Lent, À éviter,
+  Nouveau, À tester) + historique.
+- **Section Sourcing du drawer produit** : fournisseur actuel, coût,
+  marge, meilleur prix historique, dernier prix reçu, fournisseur
+  recommandé, statut (à sourcer / stable / marge faible / fournisseur
+  risqué), comparaison dépliable et « Demander un nouveau prix » (wa.me).
+
+### WhatsApp V1 (toujours manuel)
+- **10 templates** : prix, stock, délai, relance 24 h, relance 48 h,
+  tracking, confirmation fournisseur choisi, négociation prix, produit
+  similaire, problème commande.
+- Variables visibles avant envoi, prévisualisation, **bouton Copier**,
+  ouverture wa.me, statuts suivis, multi-fournisseurs inchangé (un message
+  par fournisseur, jamais d'envoi automatique).
+
+### Santé des données (Data Quality Center)
+- `/system` devient le centre de qualité : **Data Health Score** (Pixel,
+  Webhooks, Commandes, Sessions, Réconciliation, UTM, Anomalies) +
+  doublons/événements incomplets comptés, dernière commande reçue.
+- Boutons : **Tester le tracking** (insertion test en transaction annulée,
+  latence mesurée), Réinstaller le pixel, Resynchroniser, **Exporter
+  diagnostic**.
+
+### Exports & confort
+- `/api/export` : **CSV ou JSON** pour commandes à traiter, fournisseurs,
+  messages, produits à re-sourcer, anomalies, sessions suspectes, activité,
+  diagnostic — en démo comme en live.
+- **Toasts** liquid glass, **recherche globale** (commandes, produits,
+  fournisseurs, clients anonymisés) dans la topbar, **filtres /orders
+  persistés dans l'URL** (q, status, view, focus), redirection racine vers
+  /today, navigation mise à jour (Aujourd'hui en tête, Activité).
+
+---
+
 ## [0.4.0] — Partie 2 : module Order Desk (commandes, fournisseurs, WhatsApp V1)
 
 ### Nouveau module Order Desk (sidebar : Commandes · Fournisseurs · Messages)

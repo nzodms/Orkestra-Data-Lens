@@ -5,8 +5,10 @@ import {
   AlertTriangle,
   Award,
   CheckCircle2,
+  Copy,
   CreditCard,
   ExternalLink,
+  History,
   Loader2,
   MessageCircle,
   PackageCheck,
@@ -15,6 +17,7 @@ import {
   Truck,
   Users,
 } from "lucide-react";
+import { toast } from "@/components/ui/Toaster";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Drawer } from "@/components/ui/Drawer";
 import { compareForOrder } from "@/lib/orderdesk/compare";
@@ -83,6 +86,7 @@ export function OrderDrawer({
   const margin = estimatedMarginPct(order, data.offers);
   const orderMessages = data.messages.filter((m) => m.orderId === order.id);
   const orderNotes = data.notes.filter((n) => n.entityType === "order" && n.entityId === order.id);
+  const orderActivities = (data.activities ?? []).filter((a) => a.entityId === order.id).slice(0, 12);
   const line = order.lineItems[0];
 
   const templateVars = {
@@ -371,6 +375,16 @@ export function OrderDrawer({
             </button>
           </div>
 
+          {/* Variables remplies, visibles avant envoi */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Object.entries(templateVars).map(([key, value]) => (
+              <span key={key} className="inline-flex items-center gap-1 rounded-md bg-ink/5 px-1.5 py-0.5 text-[10px]">
+                <code className="font-semibold text-ai">{`{{${key}}}`}</code>
+                <span className="max-w-36 truncate text-ink-soft">{String(value)}</span>
+              </span>
+            ))}
+          </div>
+
           {multiMode ? (
             <div className="mt-2.5 space-y-2">
               <div className="flex flex-wrap gap-1.5">
@@ -435,6 +449,17 @@ export function OrderDrawer({
                   className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12px] font-semibold shadow-sm transition-colors hover:bg-white disabled:opacity-50"
                 >
                   Préparer seulement
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard
+                      .writeText(currentBody)
+                      .then(() => toast("Message copié dans le presse-papiers", "success"))
+                      .catch(() => toast("Copie impossible", "error"));
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12px] font-semibold shadow-sm transition-colors hover:bg-white"
+                >
+                  <Copy size={13} /> Copier
                 </button>
                 {msgSupplier && !waLink(msgSupplier.whatsapp, "x") && (
                   <span className="text-[11px] text-warn">Pas de numéro WhatsApp pour ce fournisseur.</span>
@@ -555,6 +580,26 @@ export function OrderDrawer({
             </button>
           </div>
         </Section>
+
+        {/* Historique (journal d'actions) */}
+        {orderActivities.length > 0 && (
+          <Section title="Historique" icon={<History size={13} className="text-ink-soft" />}>
+            <ol className="relative ml-1 space-y-2.5 border-l border-ink/8 pl-4">
+              {orderActivities.map((a) => (
+                <li key={a.id} className="relative">
+                  <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand/60 ring-2 ring-white" />
+                  <div className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]">
+                    <span className="font-semibold">{a.title}</span>
+                    <span className="num ml-auto whitespace-nowrap text-[10.5px] text-ink-soft">
+                      {formatDateTime(a.createdAt)}
+                    </span>
+                  </div>
+                  {a.description && <p className="text-[11px] leading-snug text-ink-soft">{a.description}</p>}
+                </li>
+              ))}
+            </ol>
+          </Section>
+        )}
       </div>
     </Drawer>
   );

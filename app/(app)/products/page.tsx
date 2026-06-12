@@ -4,11 +4,13 @@ import { Card, CardTitle } from "@/components/ui/Card";
 import { LiveEmptyState } from "@/components/domain/LiveEmptyState";
 import { CATEGORY_TONES, MiniFunnel, ProductsTable } from "@/components/domain/ProductsTable";
 import { getActiveDataset } from "@/lib/server/datasource";
+import { getDeskContext } from "@/lib/server/orderdesk";
 import {
   computeProductStats,
   PRODUCT_CATEGORY_LABELS,
   type ProductCategory,
 } from "@/lib/analytics";
+import { computeProductSourcing, type ProductSourcing } from "@/lib/orderdesk/productSourcing";
 import { parsePeriod, PERIOD_LABELS } from "@/lib/funnel";
 
 export default async function ProductsPage({
@@ -24,6 +26,13 @@ export default async function ProductsPage({
   const stats = computeProductStats(dataset, period);
   const insights = stats.filter((s) => s.insight);
 
+  // Sourcing : croise les produits Data Lens avec les fournisseurs Order Desk
+  const { data: desk } = await getDeskContext();
+  const sourcing: Record<string, ProductSourcing> = {};
+  for (const s of stats) {
+    sourcing[s.product.id] = computeProductSourcing(s.product.id, s.product.priceMin, desk);
+  }
+
   const categories: ProductCategory[] = ["scaler", "ameliorer", "bloque_checkout", "suspect", "couper"];
   const grouped = categories
     .map((c) => ({ category: c, items: stats.filter((s) => s.category === c) }))
@@ -37,7 +46,11 @@ export default async function ProductsPage({
           Performance par produit
         </CardTitle>
         <div className="-mx-4 px-4 md:-mx-5 md:px-5">
-          <ProductsTable stats={stats} />
+          <ProductsTable
+            stats={stats}
+            sourcing={JSON.parse(JSON.stringify(sourcing))}
+            suppliers={JSON.parse(JSON.stringify(desk.suppliers))}
+          />
         </div>
       </Card>
 

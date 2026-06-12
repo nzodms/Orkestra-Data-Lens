@@ -1,3 +1,4 @@
+import type { ActivityLog, AlertState } from "@/lib/activity";
 import type { DeskAction } from "@/lib/orderdesk/actions";
 import type {
   DeskData,
@@ -338,10 +339,69 @@ const DEMO_NOTES: InternalNote[] = [
   },
 ];
 
+// ─── Journal d'actions de démonstration ──────────────────────────────────────
+
+function buildActivities(orders: DeskOrder[]): ActivityLog[] {
+  const shipped = orders.find((o) => o.opsStatus === "shipped");
+  const problem = orders.find((o) => o.opsStatus === "problem");
+  const entries: ActivityLog[] = [
+    {
+      id: nextId("act"),
+      shopId: "shop_demo_01",
+      entityType: "system",
+      entityId: "sync",
+      action: "sync_completed",
+      title: "Synchronisation Shopify terminée",
+      description: "6 produits, 15 commandes importés",
+      actorType: "system",
+      createdAt: at(0, "06:30:00"),
+    },
+  ];
+  if (shipped) {
+    entries.push({
+      id: nextId("act"),
+      shopId: "shop_demo_01",
+      entityType: "tracking",
+      entityId: shipped.id,
+      action: "tracking_added",
+      title: `Tracking ajouté sur ${shipped.orderNumber}`,
+      description: `${shipped.trackingNumber} (${shipped.trackingCarrier}) — commande marquée expédiée`,
+      actorType: "user",
+      createdAt: at(1, "09:42:00"),
+    });
+  }
+  if (problem) {
+    entries.push({
+      id: nextId("act"),
+      shopId: "shop_demo_01",
+      entityType: "order",
+      entityId: problem.id,
+      action: "problem_reported",
+      title: `Problème signalé sur ${problem.orderNumber}`,
+      description: problem.problemNote,
+      actorType: "user",
+      createdAt: at(1, "18:15:00"),
+    });
+  }
+  entries.push({
+    id: nextId("act"),
+    shopId: "shop_demo_01",
+    entityType: "supplier",
+    entityId: "sup_lightpro",
+    action: "quote_received",
+    title: "Prix reçu de Shenzhen LightPro",
+    description: "48,00 € + 12,50 € livraison · 9 j",
+    actorType: "user",
+    createdAt: at(0, "09:21:00"),
+  });
+  return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 // ─── Store mutable (mode démo) ────────────────────────────────────────────────
 
 let store: DeskData | null = null;
 let storeDay: string | null = null;
+const alertStates = new Map<string, AlertState>();
 
 export function getDemoDeskData(): DeskData {
   const today = new Date().toDateString();
@@ -355,9 +415,30 @@ export function getDemoDeskData(): DeskData {
     quotes,
     messages,
     notes: [...DEMO_NOTES],
+    activities: buildActivities(orders),
   };
   storeDay = today;
   return store;
+}
+
+/** Ajoute une entrée au journal d'actions démo (non persisté). */
+export function logDemoActivity(entry: Omit<ActivityLog, "id" | "shopId" | "createdAt">): void {
+  const data = getDemoDeskData();
+  data.activities.unshift({
+    ...entry,
+    id: nextId("act"),
+    shopId: "shop_demo_01",
+    createdAt: new Date().toISOString(),
+  });
+  if (data.activities.length > 500) data.activities.length = 500;
+}
+
+export function getDemoAlertStates(): Map<string, AlertState> {
+  return alertStates;
+}
+
+export function setDemoAlertState(alertKey: string, state: AlertState): void {
+  alertStates.set(alertKey, state);
 }
 
 /** Applique une action au store démo (non persisté). */

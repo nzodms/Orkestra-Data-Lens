@@ -35,8 +35,8 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-0.5 px-3">
-        {(["datalens", "orderdesk", "config"] as NavSection[]).map((section) => (
-          <div key={section} className={cn(section !== "datalens" && "pt-3")}>
+        {(["cockpit", "datalens", "orderdesk", "config"] as NavSection[]).map((section) => (
+          <div key={section} className={cn(section !== "cockpit" && "pt-3")}>
             {NAV_SECTION_LABELS[section] && (
               <div className="px-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.16em] text-ink-soft/70">
                 {NAV_SECTION_LABELS[section]}

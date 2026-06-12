@@ -24,7 +24,7 @@ export type WhatsAppTemplate = {
 export const WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
   {
     key: "price_availability",
-    name: "Demande de prix et disponibilité",
+    name: "Demande de prix",
     body: `Bonjour, pouvez-vous me confirmer le meilleur prix, la disponibilité et le délai de livraison pour ce produit ?
 Produit : {{product_name}}
 Variante : {{variant}}
@@ -34,8 +34,17 @@ Lien / référence : {{product_reference}}
 Merci.`,
   },
   {
+    key: "stock_request",
+    name: "Demande stock",
+    body: `Bonjour, quel est votre stock disponible actuellement pour ce produit ?
+Produit : {{product_name}}
+Variante : {{variant}}
+Quantité souhaitée : {{quantity}}
+Merci de me confirmer la disponibilité immédiate.`,
+  },
+  {
     key: "lead_time",
-    name: "Demande de délai livraison",
+    name: "Demande délai",
     body: `Bonjour, quel est votre délai de livraison actuel pour ce produit ?
 Produit : {{product_name}}
 Quantité : {{quantity}}
@@ -43,15 +52,21 @@ Pays de livraison : {{country}}
 Merci de me confirmer la date d'expédition possible.`,
   },
   {
-    key: "order_confirmation",
-    name: "Confirmation commande fournisseur",
-    body: `Bonjour, je confirme la commande suivante :
+    key: "follow_up_24h",
+    name: "Relance 24h",
+    body: `Bonjour, petit rappel concernant ma demande d'hier :
 Produit : {{product_name}}
-Variante : {{variant}}
-Quantité : {{quantity}}
-Pays de livraison : {{country}}
 Référence interne : {{order_number}}
-Merci de me confirmer la réception et le montant total à régler.`,
+Pouvez-vous me répondre aujourd'hui ? Merci.`,
+  },
+  {
+    key: "follow_up_48h",
+    name: "Relance 48h",
+    body: `Bonjour, je reviens vers vous : ma demande date de plus de 48 h et je dois avancer sur cette commande.
+Produit : {{product_name}}
+Référence interne : {{order_number}}
+Sans réponse aujourd'hui, je devrai passer par un autre fournisseur.
+Merci de votre retour rapide.`,
   },
   {
     key: "tracking_request",
@@ -63,31 +78,41 @@ Quantité : {{quantity}}
 Merci.`,
   },
   {
-    key: "follow_up",
-    name: "Relance fournisseur",
-    body: `Bonjour, je reviens vers vous concernant ma demande sur ce produit :
+    key: "order_confirmation",
+    name: "Confirmation fournisseur choisi",
+    body: `Bonjour, je confirme la commande suivante :
 Produit : {{product_name}}
+Variante : {{variant}}
+Quantité : {{quantity}}
+Pays de livraison : {{country}}
 Référence interne : {{order_number}}
-Avez-vous pu avancer ? J'ai besoin d'une réponse rapidement pour confirmer la commande.
+Merci de me confirmer la réception et le montant total à régler.`,
+  },
+  {
+    key: "price_negotiation",
+    name: "Négociation prix",
+    body: `Bonjour, votre offre m'intéresse mais le prix est au-dessus de mon objectif :
+Produit : {{product_name}}
+Quantité : {{quantity}} (volume régulier prévu)
+Pouvez-vous faire un effort sur le prix unitaire ou la livraison ? Avec un meilleur tarif, je peux confirmer aujourd'hui.
 Merci.`,
   },
   {
+    key: "similar_product",
+    name: "Produit similaire à sourcer",
+    body: `Bonjour, je cherche un produit similaire à celui-ci :
+Référence : {{product_reference}}
+Produit : {{product_name}}
+Avez-vous un modèle équivalent en stock ? Merci de m'envoyer photos, prix et délai.`,
+  },
+  {
     key: "product_issue",
-    name: "Problème produit",
+    name: "Problème commande",
     body: `Bonjour, nous avons un problème sur cette commande :
 Référence interne : {{order_number}}
 Produit : {{product_name}}
 Problème : {{issue}}
 Merci de me proposer une solution (renvoi ou remboursement).`,
-  },
-  {
-    key: "volume_price",
-    name: "Demande meilleur prix pour volume",
-    body: `Bonjour, nous augmentons nos volumes sur ce produit :
-Produit : {{product_name}}
-Volume prévu : {{quantity}} unités / mois
-Pouvez-vous me proposer votre meilleur prix pour ce volume, ainsi que le délai et le MOQ ?
-Merci.`,
   },
 ];
 

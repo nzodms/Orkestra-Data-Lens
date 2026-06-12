@@ -1,12 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Lightbulb, Wrench } from "lucide-react";
+import { Award, ExternalLink, Factory, Lightbulb, Wrench } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Drawer } from "@/components/ui/Drawer";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { toast } from "@/components/ui/Toaster";
+import { useDeskAction } from "@/components/orderdesk/useDeskAction";
 import { PRODUCT_CATEGORY_LABELS, type ProductCategory, type ProductStats } from "@/lib/analytics";
-import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
+import { SOURCING_STATUS_LABELS, type ProductSourcing } from "@/lib/orderdesk/productSourcing";
+import { fillTemplate, templateByKey, waLink } from "@/lib/orderdesk/templates";
+import type { Supplier } from "@/lib/orderdesk/types";
+import { formatDate, formatEUR, formatNumber, formatPct } from "@/lib/utils";
+
+const SOURCING_TONES: Record<ProductSourcing["status"], BadgeTone> = {
+  a_sourcer: "orange",
+  stable: "green",
+  marge_faible: "red",
+  fournisseur_risque: "red",
+};
 
 export const CATEGORY_TONES: Record<ProductCategory, BadgeTone> = {
   scaler: "green",
@@ -17,8 +29,44 @@ export const CATEGORY_TONES: Record<ProductCategory, BadgeTone> = {
   correct: "blue",
 };
 
-export function ProductsTable({ stats }: { stats: ProductStats[] }) {
+export function ProductsTable({
+  stats,
+  sourcing,
+  suppliers,
+}: {
+  stats: ProductStats[];
+  sourcing?: Record<string, ProductSourcing>;
+  suppliers?: Supplier[];
+}) {
   const [selected, setSelected] = useState<ProductStats | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
+  const { run, pending } = useDeskAction();
+
+  const requestPrice = async (product: ProductStats["product"], supplier: Supplier) => {
+    const body = fillTemplate(templateByKey("price_availability")?.body ?? "", {
+      product_name: product.title,
+      variant: "—",
+      quantity: 1,
+      country: "FR",
+      product_reference: product.handle || product.id,
+    });
+    const link = waLink(supplier.whatsapp, body);
+    const ok = await run({
+      type: "record_message",
+      supplierId: supplier.id,
+      templateKey: "price_availability",
+      body,
+      status: link ? "sent_manual" : "prepared",
+    });
+    if (ok) {
+      if (link) {
+        window.open(link, "_blank", "noopener");
+        toast(`Demande de prix envoyée à ${supplier.name}`, "success");
+      } else {
+        toast(`Message préparé pour ${supplier.name} (pas de WhatsApp) — voir Messages`, "info");
+      }
+    }
+  };
 
   return (
     <>
@@ -132,6 +180,103 @@ export function ProductsTable({ stats }: { stats: ProductStats[] }) {
                 <p className="text-[12px] leading-relaxed text-ink-soft">{selected.recommendedAction}</p>
               </div>
             </div>
+
+            {/* Sourcing : historique produit ↔ fournisseurs */}
+            {sourcing?.[selected.product.id] && (
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
+                  <Factory size={12} /> Sourcing
+                  <Badge tone={SOURCING_TONES[sourcing[selected.product.id].status]} className="ml-1">
+                    {SOURCING_STATUS_LABELS[sourcing[selected.product.id].status]}
+                  </Badge>
+                </div>
+                {(() => {
+                  const src = sourcing[selected.product.id];
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                        <MiniStat
+                          label="Fournisseur actuel"
+                          value={src.currentSupplierName ?? "Aucun"}
+                        />
+                        <MiniStat
+                          label="Coût actuel"
+                          value={src.currentCost != null ? formatEUR(src.currentCost) : "—"}
+                        />
+                        <MiniStat
+                          label="Marge estimée"
+                          value={src.marginPct != null ? `${src.marginPct} %` : "—"}
+                        />
+                        <MiniStat
+                          label="Meilleur prix connu"
+                          value={src.bestHistoricalPrice != null ? formatEUR(src.bestHistoricalPrice) : "—"}
+                        />
+                        <MiniStat
+                          label="Dernier prix reçu"
+                          value={
+                            src.lastQuotePrice != null
+                              ? `${formatEUR(src.lastQuotePrice)}${src.lastQuoteAt ? ` (${formatDate(src.lastQuoteAt)})` : ""}`
+                              : "—"
+                          }
+                        />
+                        <MiniStat
+                          label="Délai moyen"
+                          value={src.avgLeadTimeDays != null ? `${src.avgLeadTimeDays} j` : "—"}
+                        />
+                      </div>
+
+                      {src.comparison.recommendation && (
+                        <p className="flex items-start gap-2 rounded-xl bg-positive-soft/70 px-3 py-2 text-[11.5px] font-medium leading-relaxed text-positive">
+                          <Award size={13} className="mt-0.5 shrink-0" /> {src.comparison.recommendation}
+                        </p>
+                      )}
+
+                      <button
+                        onClick={() => setShowCompare((s) => !s)}
+                        disabled={src.comparison.rows.length === 0}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3 py-1.5 text-[12px] font-semibold shadow-sm transition-colors hover:bg-white disabled:opacity-50"
+                      >
+                        {showCompare ? "Masquer la comparaison" : `Comparer fournisseurs (${src.comparison.rows.length})`}
+                      </button>
+
+                      {showCompare && src.comparison.rows.length > 0 && (
+                        <div className="fade-up space-y-1.5">
+                          {src.comparison.rows.map((row) => {
+                            const supplier = suppliers?.find((s) => s.id === row.supplier.id);
+                            return (
+                              <div key={row.offer.id} className="inset-panel flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11.5px]">
+                                <span className="font-semibold">{row.supplier.name}</span>
+                                {row.flags.recommended && <Badge tone="green">Recommandé</Badge>}
+                                {row.flags.avoid && <Badge tone="red">À éviter</Badge>}
+                                <span className="num text-ink-soft">
+                                  {formatEUR(row.totalPrice)} · {row.leadTimeDays ?? "—"} j · fiab. {row.reliability}
+                                  {row.estimatedMarginPct != null && ` · marge ${row.estimatedMarginPct} %`}
+                                </span>
+                                {supplier && (
+                                  <button
+                                    onClick={() => requestPrice(selected.product, supplier)}
+                                    disabled={pending}
+                                    className="ml-auto inline-flex items-center gap-1 rounded-lg border border-ink/10 bg-white/70 px-2 py-1 text-[10.5px] font-semibold shadow-sm hover:bg-white disabled:opacity-50"
+                                  >
+                                    <ExternalLink size={10} /> Demander un nouveau prix
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {src.comparison.rows.length === 0 && (
+                        <p className="text-[11.5px] text-ink-soft">
+                          Aucun fournisseur connu pour ce produit. Ajoutez une offre depuis la page Fournisseurs.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
       </Drawer>

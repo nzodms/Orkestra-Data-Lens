@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertTriangle, Clock3, Kanban, Rows3, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Clock3, GripVertical, Kanban, Rows3, Search, Truck } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { toast } from "@/components/ui/Toaster";
 import { OrderDrawer, statusTone } from "./OrderDrawer";
 import { useDeskAction } from "./useDeskAction";
 import { buildTodoList, ordersForFilterKey } from "@/lib/orderdesk/todo";
@@ -18,21 +19,90 @@ import {
 } from "@/lib/orderdesk/types";
 import { cn, formatDate, formatEUR } from "@/lib/utils";
 
-export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" | "live" }) {
+export type OrdersInitialFilters = {
+  q?: string;
+  status?: string;
+  view?: string;
+  focus?: string;
+};
+
+/** Règles de déplacement Kanban — retourne un avertissement si données manquantes. */
+function validateMove(order: DeskOrder, target: OpsStatus): string | null {
+  if (target === "supplier_chosen" && !order.supplierId) {
+    return "Aucun fournisseur n'est assigné à cette commande.";
+  }
+  if (target === "payment_pending" && order.supplierCost == null) {
+    return "Aucun coût fournisseur n'est renseigné pour cette commande.";
+  }
+  if (target === "shipped" && !order.trackingNumber) {
+    return "Aucun numéro de tracking n'est enregistré pour cette commande.";
+  }
+  return null;
+}
+
+export function OrdersWorkspace({
+  data,
+  mode,
+  initialFilters = {},
+}: {
+  data: DeskData;
+  mode: "demo" | "live";
+  initialFilters?: OrdersInitialFilters;
+}) {
   const { run, pending, error } = useDeskAction();
-  const [view, setView] = useState<"kanban" | "table">("kanban");
-  const [statusFilter, setStatusFilter] = useState<"all" | OpsStatus>("all");
+  const [view, setView] = useState<"kanban" | "table">(initialFilters.view === "table" ? "table" : "kanban");
+  const [statusFilter, setStatusFilter] = useState<"all" | OpsStatus>(
+    OPS_STATUS_ORDER.includes(initialFilters.status as OpsStatus) ? (initialFilters.status as OpsStatus) : "all"
+  );
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
-  const [todoFilter, setTodoFilter] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [todoFilter, setTodoFilter] = useState<string | null>(initialFilters.focus ?? null);
+  const [search, setSearch] = useState(initialFilters.q ?? "");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const todos = useMemo(() => buildTodoList(data), [data]);
-  const countries = useMemo(() => [...new Set(data.orders.map((o) => o.country).filter(Boolean))] as string[], [data.orders]);
+  // Drag-and-drop : état optimiste + confirmation pour les déplacements incomplets
+  const [optimistic, setOptimistic] = useState<Record<string, OpsStatus>>({});
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overColumn, setOverColumn] = useState<string | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ order: DeskOrder; target: OpsStatus; warning: string } | null>(null);
+
+  // Purge l'état optimiste quand les données serveur confirment le statut
+  useEffect(() => {
+    setOptimistic((prev) => {
+      const next = { ...prev };
+      for (const [id, status] of Object.entries(prev)) {
+        const fresh = data.orders.find((o) => o.id === id);
+        if (!fresh || fresh.opsStatus === status) delete next[id];
+      }
+      return next;
+    });
+  }, [data.orders]);
+
+  // Filtres persistés dans l'URL (partage / refresh)
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (search) params.set("q", search);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (view !== "kanban") params.set("view", view);
+    if (todoFilter) params.set("focus", todoFilter);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `/orders${qs ? `?${qs}` : ""}`);
+  }, [search, statusFilter, view, todoFilter]);
+
+  const effectiveStatus = (o: DeskOrder): OpsStatus => optimistic[o.id] ?? o.opsStatus;
+  const withOptimistic = useMemo(
+    () => data.orders.map((o) => (optimistic[o.id] ? { ...o, opsStatus: optimistic[o.id] } : o)),
+    [data.orders, optimistic]
+  );
+
+  const todos = useMemo(() => buildTodoList({ ...data, orders: withOptimistic }), [data, withOptimistic]);
+  const countries = useMemo(
+    () => [...new Set(data.orders.map((o) => o.country).filter(Boolean))] as string[],
+    [data.orders]
+  );
 
   const filtered = useMemo(() => {
-    let orders = todoFilter ? ordersForFilterKey(data.orders, todoFilter) : data.orders;
+    let orders = todoFilter ? ordersForFilterKey(withOptimistic, todoFilter) : withOptimistic;
     if (statusFilter !== "all") orders = orders.filter((o) => o.opsStatus === statusFilter);
     if (supplierFilter === "none") orders = orders.filter((o) => !o.supplierId);
     else if (supplierFilter !== "all") orders = orders.filter((o) => o.supplierId === supplierFilter);
@@ -42,11 +112,33 @@ export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" |
       orders = orders.filter(
         (o) =>
           o.orderNumber.toLowerCase().includes(q) ||
+          (o.customerMasked ?? "").toLowerCase().includes(q) ||
           o.lineItems.some((li) => li.title.toLowerCase().includes(q))
       );
     }
     return orders;
-  }, [data.orders, statusFilter, supplierFilter, countryFilter, search, todoFilter]);
+  }, [withOptimistic, statusFilter, supplierFilter, countryFilter, search, todoFilter]);
+
+  const moveTo = async (order: DeskOrder, target: OpsStatus, forced = false) => {
+    if (effectiveStatus(order) === target) return;
+    const warning = validateMove(order, target);
+    if (warning && !forced) {
+      setPendingMove({ order, target, warning });
+      return;
+    }
+    setOptimistic((p) => ({ ...p, [order.id]: target }));
+    const ok = await run({ type: "set_status", orderId: order.id, status: target });
+    if (ok) {
+      toast(`${order.orderNumber} → ${OPS_STATUS_LABELS[target]}`, "success");
+    } else {
+      setOptimistic((p) => {
+        const n = { ...p };
+        delete n[order.id];
+        return n;
+      });
+      toast(`Impossible de déplacer ${order.orderNumber}`, "error");
+    }
+  };
 
   const selected = selectedId ? data.orders.find((o) => o.id === selectedId) ?? null : null;
   const selectCls =
@@ -155,8 +247,8 @@ export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" |
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Commande, produit…"
-            className={cn(selectCls, "w-44 pl-7")}
+            placeholder="Commande, produit, client…"
+            className={cn(selectCls, "w-48 pl-7")}
           />
         </div>
         <span className="num text-[11.5px] text-ink-soft">{filtered.length} commande{filtered.length > 1 ? "s" : ""}</span>
@@ -164,32 +256,70 @@ export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" |
 
       {error && <p className="rounded-xl bg-critical-soft px-3 py-2 text-[12px] font-medium text-critical">{error}</p>}
 
-      {/* Vue Kanban */}
+      {/* Vue Kanban (drag-and-drop) */}
       {view === "kanban" ? (
         <div className="-mx-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
-          <div className="flex gap-3" style={{ minWidth: KANBAN_COLUMNS.length * 240 }}>
+          <div className="flex gap-3" style={{ minWidth: KANBAN_COLUMNS.length * 236 }}>
             {KANBAN_COLUMNS.map((col) => {
               const colOrders = filtered.filter((o) => col.statuses.includes(o.opsStatus));
+              const dropTarget: OpsStatus = col.key === "tracking" ? "tracking_pending" : col.statuses[0];
+              const isOver = overColumn === col.key;
               return (
-                <div key={col.key} className="w-60 shrink-0">
+                <div
+                  key={col.key}
+                  className="w-[228px] shrink-0"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setOverColumn(col.key);
+                  }}
+                  onDragLeave={() => setOverColumn((c) => (c === col.key ? null : c))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setOverColumn(null);
+                    const id = e.dataTransfer.getData("text/orkestra-order") || dragId;
+                    setDragId(null);
+                    const order = id ? data.orders.find((o) => o.id === id) : null;
+                    if (order) moveTo(order, dropTarget);
+                  }}
+                >
                   <div className="mb-2 flex items-center justify-between px-1">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-ink-soft">{col.label}</span>
+                    <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-ink-soft">{col.label}</span>
                     <span className="num rounded-full bg-ink/5 px-1.5 py-0.5 text-[10.5px] font-bold text-ink-soft">
                       {colOrders.length}
                     </span>
                   </div>
-                  <div className="space-y-2">
+                  <div
+                    className={cn(
+                      "space-y-2 rounded-xl p-1 transition-all duration-150",
+                      isOver && "bg-brand-soft/50 ring-2 ring-brand/30"
+                    )}
+                  >
                     {colOrders.map((order) => (
                       <KanbanCard
                         key={order.id}
                         order={order}
                         data={data}
+                        dragging={dragId === order.id}
+                        onDragStart={(e) => {
+                          setDragId(order.id);
+                          e.dataTransfer.setData("text/orkestra-order", order.id);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => {
+                          setDragId(null);
+                          setOverColumn(null);
+                        }}
                         onOpen={() => setSelectedId(order.id)}
                       />
                     ))}
                     {colOrders.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-ink/10 py-6 text-center text-[11px] text-ink-soft/60">
-                        Aucune commande
+                      <div
+                        className={cn(
+                          "rounded-xl border border-dashed py-6 text-center text-[11px] transition-colors",
+                          isOver ? "border-brand/50 text-brand" : "border-ink/10 text-ink-soft/60"
+                        )}
+                      >
+                        {isOver ? "Déposer ici" : "Aucune commande"}
                       </div>
                     )}
                   </div>
@@ -270,6 +400,49 @@ export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" |
         </div>
       )}
 
+      {/* Confirmation de déplacement forcé */}
+      {pendingMove && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button
+            aria-label="Annuler"
+            className="absolute inset-0 cursor-default bg-ink/25 backdrop-blur-[3px]"
+            onClick={() => setPendingMove(null)}
+          />
+          <div className="glass-strong fade-up relative w-full max-w-md rounded-2xl p-5">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-warn-soft text-warn">
+                <AlertTriangle size={17} />
+              </span>
+              <div>
+                <h3 className="text-[14px] font-semibold tracking-tight">
+                  Déplacer {pendingMove.order.orderNumber} vers « {OPS_STATUS_LABELS[pendingMove.target]} » ?
+                </h3>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">{pendingMove.warning}</p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => setPendingMove(null)}
+                className="rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12.5px] font-semibold shadow-sm hover:bg-white"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  const move = pendingMove;
+                  setPendingMove(null);
+                  if (move) moveTo(move.order, move.target, true);
+                }}
+                disabled={pending}
+                className="rounded-xl bg-warn px-3.5 py-2 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                Marquer comme fait malgré données manquantes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Drawer détail */}
       <OrderDrawer
         order={selected}
@@ -283,7 +456,21 @@ export function OrdersWorkspace({ data, mode }: { data: DeskData; mode: "demo" |
   );
 }
 
-function KanbanCard({ order, data, onOpen }: { order: DeskOrder; data: DeskData; onOpen: () => void }) {
+function KanbanCard({
+  order,
+  data,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onOpen,
+}: {
+  order: DeskOrder;
+  data: DeskData;
+  dragging: boolean;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onOpen: () => void;
+}) {
   const supplier = order.supplierId ? data.suppliers.find((s) => s.id === order.supplierId) : undefined;
   const margin = estimatedMarginPct(order, data.offers);
   const late = isLate(order);
@@ -291,18 +478,31 @@ function KanbanCard({ order, data, onOpen }: { order: DeskOrder; data: DeskData;
   const age = daysSince(order.createdAt);
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={onOpen}
-      className="card card-hover w-full p-3 text-left"
+      onKeyDown={(e) => e.key === "Enter" && onOpen()}
+      className={cn(
+        "card card-hover w-full cursor-grab p-3 text-left active:cursor-grabbing",
+        dragging && "opacity-40 ring-2 ring-brand/40"
+      )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="num text-[12px] font-bold">{order.orderNumber}</span>
+        <span className="num flex items-center gap-1 text-[12px] font-bold">
+          <GripVertical size={11} className="text-ink-soft/40" />
+          {order.orderNumber}
+        </span>
         <span className="num text-[10px] text-ink-soft">{age === 0 ? "aujourd'hui" : `J-${age}`}</span>
       </div>
       <div className="mt-1 truncate text-[12px] font-medium">
         {line?.title ?? "—"}
         {line && line.quantity > 1 && <span className="num text-ink-soft"> ×{line.quantity}</span>}
       </div>
+      <div className="truncate text-[10.5px] text-ink-soft">{order.customerMasked ?? "client masqué"} · {order.country ?? "—"}</div>
       <div className="mt-1.5 flex items-baseline justify-between gap-2">
         <span className="num text-[13px] font-semibold">{formatEUR(order.totalPrice)}</span>
         {margin != null && (
@@ -319,13 +519,19 @@ function KanbanCard({ order, data, onOpen }: { order: DeskOrder; data: DeskData;
         )}
         {late && (
           <Badge tone="red">
-            <Clock3 size={10} /> Retard
+            <Clock3 size={10} /> Urgent
+          </Badge>
+        )}
+        {order.opsStatus === "problem" && <Badge tone="red">Problème</Badge>}
+        {order.trackingNumber && (
+          <Badge tone="green">
+            <Truck size={10} /> Tracking
           </Badge>
         )}
       </div>
       <div className="mt-2 border-t border-ink/5 pt-1.5 text-[10.5px] font-medium text-brand-strong">
         → {NEXT_ACTIONS[order.opsStatus]}
       </div>
-    </button>
+    </div>
   );
 }
