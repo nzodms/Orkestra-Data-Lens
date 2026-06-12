@@ -294,3 +294,97 @@ export async function computeDataHealth(dataset: Dataset, status: AppStatus): Pr
 
   return { globalScore, components, duplicates, incompleteEvents, lastOrderAt };
 }
+
+// ─── Diagnostic Shopify (carte Paramètres) ───────────────────────────────────
+
+/**
+ * Checklist de connexion, calculée depuis l'état stocké (aucun appel
+ * Shopify : le bouton « Tester la connexion » rafraîchit api_error /
+ * last_api_check_at avec de vraies requêtes).
+ */
+export function runConnectionDiagnostic(status: AppStatus): Check[] {
+  if (status.mode === "demo" && !status.shopDomain) {
+    return [
+      {
+        name: "Connexion Shopify",
+        status: "warn",
+        detail: "Aucune boutique connectée — connectez votre boutique par OAuth ou token Admin API ci-dessus.",
+      },
+    ];
+  }
+
+  const checks: Check[] = [];
+  const scopes = status.installedScopes ?? [];
+
+  checks.push({
+    name: "Domaine valide",
+    status: /\.myshopify\.com$/.test(status.shopDomain ?? "") ? "ok" : "fail",
+    detail: status.shopDomain ?? "—",
+  });
+  checks.push(
+    status.tokenPresent
+      ? { name: "Token présent", status: "ok", detail: `Méthode : ${status.connectionMethod === "manual_token" ? "token Admin API" : "OAuth"} · ${status.tokenHint ?? "—"}` }
+      : { name: "Token présent", status: "fail", detail: "Token manquant — reconnectez la boutique." }
+  );
+  checks.push({
+    name: "Token sécurisé",
+    status: status.tokenPresent ? "ok" : "skip",
+    detail: status.tokenPresent
+      ? "Chiffré AES-256-GCM en base, jamais renvoyé au client (affichage masqué uniquement)."
+      : "Pas de token enregistré.",
+  });
+  checks.push(
+    scopes.length === 0
+      ? { name: "Scopes produits", status: "warn", detail: "Liste de scopes non disponible — relancer « Tester la connexion »." }
+      : scopes.includes("read_products")
+        ? { name: "Scopes produits", status: "ok", detail: "read_products accordé" }
+        : { name: "Scopes produits", status: "fail", detail: "read_products manquant — ajoutez-le dans l'app Shopify." }
+  );
+  const ordersOk = scopes.includes("read_orders") || scopes.includes("read_all_orders");
+  checks.push(
+    scopes.length === 0
+      ? { name: "Scopes commandes", status: "warn", detail: "Liste de scopes non disponible." }
+      : ordersOk
+        ? { name: "Scopes commandes", status: "ok", detail: scopes.includes("read_all_orders") ? "read_all_orders accordé" : "read_orders accordé (60 derniers jours)" }
+        : { name: "Scopes commandes", status: "fail", detail: "read_orders manquant — ajoutez-le dans l'app Shopify." }
+  );
+  checks.push(
+    scopes.length === 0
+      ? { name: "Scopes remboursements", status: "warn", detail: "Liste de scopes non disponible." }
+      : ordersOk
+        ? { name: "Scopes remboursements", status: "ok", detail: "Couverts par read_orders (refunds inclus dans les commandes)." }
+        : { name: "Scopes remboursements", status: "fail", detail: "Nécessite read_orders." }
+  );
+  checks.push(
+    status.apiError
+      ? { name: "Test API", status: "fail", detail: `${status.apiError} (dernier test : ${status.lastApiCheckAt ?? "—"})` }
+      : status.lastApiCheckAt
+        ? { name: "Test API", status: "ok", detail: `Dernier test réussi : ${new Date(status.lastApiCheckAt).toLocaleString("fr-FR")}` }
+        : { name: "Test API", status: "warn", detail: "Jamais testé — bouton « Tester la connexion »." }
+  );
+  checks.push(
+    !status.lastSync
+      ? { name: "Dernière sync", status: "warn", detail: "Jamais synchronisé — lancez « Resynchroniser 30 jours »." }
+      : status.lastSync.status === "error"
+        ? { name: "Dernière sync", status: "fail", detail: status.lastSync.error_message ?? "Échec de la dernière synchronisation." }
+        : {
+            name: "Dernière sync",
+            status: "ok",
+            detail: `${new Date(status.lastSync.started_at).toLocaleString("fr-FR")} · ${status.lastSync.products_synced} produits, ${status.lastSync.orders_synced} commandes, ${status.lastSync.refunds_synced} remboursements`,
+          }
+  );
+  checks.push(
+    status.pixelStatus === "installed"
+      ? { name: "Pixel installé", status: "ok", detail: status.webPixelId ?? "installé" }
+      : status.pixelStatus === "error"
+        ? { name: "Pixel installé", status: "fail", detail: status.pixelError ?? "Erreur d'installation" }
+        : { name: "Pixel installé", status: "warn", detail: "Non installé — l'attribution comportementale attend le pixel." }
+  );
+  checks.push(
+    status.lastEventAt
+      ? { name: "Dernier event tracking", status: "ok", detail: new Date(status.lastEventAt).toLocaleString("fr-FR") }
+      : { name: "Dernier event tracking", status: "warn", detail: "Aucun événement reçu — testez avec « Envoyer un événement test »." }
+  );
+
+  return checks;
+}

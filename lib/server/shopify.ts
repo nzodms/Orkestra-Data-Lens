@@ -96,9 +96,10 @@ export async function shopifyGraphQL<T>(
   shopDomain: string,
   accessToken: string,
   query: string,
-  variables: Record<string, unknown> = {}
+  variables: Record<string, unknown> = {},
+  apiVersion: string = SHOPIFY_API_VERSION
 ): Promise<T> {
-  const res = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+  const res = await fetch(`https://${shopDomain}/admin/api/${apiVersion}/graphql.json`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -109,7 +110,7 @@ export async function shopifyGraphQL<T>(
   if (res.status === 429) {
     // Throttling : une seule relance après une courte pause
     await new Promise((r) => setTimeout(r, 1500));
-    return shopifyGraphQL(shopDomain, accessToken, query, variables);
+    return shopifyGraphQL(shopDomain, accessToken, query, variables, apiVersion);
   }
   if (!res.ok) throw new ShopifyApiError(`GraphQL Shopify : HTTP ${res.status}`, res.status);
   const body = (await res.json()) as { data?: T; errors?: { message: string }[] };
@@ -130,10 +131,11 @@ export async function shopifyRestPaginated<T>(
   path: string,
   params: Record<string, string>,
   extract: (body: unknown) => T[],
-  maxPages = 20
+  maxPages = 20,
+  apiVersion: string = SHOPIFY_API_VERSION
 ): Promise<T[]> {
   const all: T[] = [];
-  let url: string | null = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/${path}?${new URLSearchParams(params)}`;
+  let url: string | null = `https://${shopDomain}/admin/api/${apiVersion}/${path}?${new URLSearchParams(params)}`;
 
   for (let page = 0; page < maxPages && url; page++) {
     const res: Response = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
@@ -214,4 +216,90 @@ export function shopifyIdToNumeric(gid: string | number | null | undefined): str
   const s = String(gid);
   const match = s.match(/\/(\d+)$/);
   return match ? match[1] : s;
+}
+
+// ─── Connexion par token Admin API manuel (Option B) ─────────────────────────
+
+export type ConnectionTest = {
+  ok: boolean;
+  shopName?: string;
+  currency?: string;
+  timezone?: string;
+  scopes: string[];
+  missingScopes: string[];
+  error?: string;
+};
+
+/** Scopes minimum pour produits / commandes / remboursements. */
+export const REQUIRED_SCOPES = ["read_products", "read_orders"];
+
+/**
+ * Teste un couple domaine + token Admin API avec de vraies requêtes :
+ * GET shop.json (validité du token) + GET oauth/access_scopes.json (scopes).
+ * Retourne le résultat réel — jamais de faux « connecté ».
+ */
+export async function testConnection(
+  shopDomain: string,
+  accessToken: string,
+  apiVersion: string = SHOPIFY_API_VERSION
+): Promise<ConnectionTest> {
+  try {
+    const shopRes = await fetch(`https://${shopDomain}/admin/api/${apiVersion}/shop.json`, {
+      headers: { "X-Shopify-Access-Token": accessToken },
+    });
+    if (shopRes.status === 401 || shopRes.status === 403) {
+      return { ok: false, scopes: [], missingScopes: REQUIRED_SCOPES, error: "Token invalide ou révoqué (401/403 Shopify)." };
+    }
+    if (shopRes.status === 404) {
+      return { ok: false, scopes: [], missingScopes: REQUIRED_SCOPES, error: "Domaine introuvable — vérifiez l'adresse *.myshopify.com." };
+    }
+    if (!shopRes.ok) {
+      return { ok: false, scopes: [], missingScopes: REQUIRED_SCOPES, error: `Shopify a répondu HTTP ${shopRes.status}.` };
+    }
+    const shopBody = (await shopRes.json()) as {
+      shop?: { name?: string; currency?: string; iana_timezone?: string };
+    };
+
+    let scopes: string[] = [];
+    try {
+      const scopesRes = await fetch(`https://${shopDomain}/admin/oauth/access_scopes.json`, {
+        headers: { "X-Shopify-Access-Token": accessToken },
+      });
+      if (scopesRes.ok) {
+        const body = (await scopesRes.json()) as { access_scopes?: { handle: string }[] };
+        scopes = (body.access_scopes ?? []).map((s) => s.handle);
+      }
+    } catch {
+      // liste de scopes indisponible : non bloquant, signalé via missingScopes
+    }
+
+    const missingScopes = REQUIRED_SCOPES.filter((s) => scopes.length > 0 && !scopes.includes(s));
+    if (missingScopes.length > 0) {
+      return {
+        ok: false,
+        shopName: shopBody.shop?.name,
+        currency: shopBody.shop?.currency,
+        timezone: shopBody.shop?.iana_timezone,
+        scopes,
+        missingScopes,
+        error: `Scopes insuffisants : ${missingScopes.join(", ")} manquant(s). Ajoutez-les dans l'app Shopify (Admin API access scopes).`,
+      };
+    }
+
+    return {
+      ok: true,
+      shopName: shopBody.shop?.name,
+      currency: shopBody.shop?.currency,
+      timezone: shopBody.shop?.iana_timezone,
+      scopes,
+      missingScopes: [],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      scopes: [],
+      missingScopes: REQUIRED_SCOPES,
+      error: `Connexion impossible : ${err instanceof Error ? err.message : "erreur réseau"}`,
+    };
+  }
 }

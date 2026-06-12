@@ -9,23 +9,27 @@ import {
   type ShopifyOrderPayload,
   type ShopRow,
 } from "./repo";
+import { SHOPIFY_API_VERSION } from "./env";
 import { shopifyGraphQL, shopifyIdToNumeric, shopifyRestPaginated } from "./shopify";
 
 /**
  * Synchronisation Shopify → base.
- * V1 : fenêtre de 30 jours par défaut (extensible à 90), relançable via le
- * bouton « Resynchroniser » de Settings. Chaque exécution est journalisée
- * dans sync_runs.
+ * Fenêtre 7/30/90 jours, scope complet ou partiel (produits seuls,
+ * commandes seules). Chaque exécution est journalisée dans sync_runs.
  */
+
+export type SyncScope = "all" | "products" | "orders";
 
 export type SyncResult = {
   status: "success" | "error";
+  scope: SyncScope;
   products: number;
   variants: number;
   orders: number;
   lineItems: number;
   refunds: number;
   customers: number;
+  durationMs: number;
   errorMessage?: string;
 };
 
@@ -41,6 +45,7 @@ type ProductsPage = {
       vendor: string;
       productType: string;
       status: string;
+      tags: string[];
       totalInventory: number | null;
       featuredImage: { url: string } | null;
       priceRangeV2: {
@@ -67,7 +72,7 @@ const PRODUCTS_QUERY = `
     products(first: 50, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        id title handle vendor productType status totalInventory
+        id title handle vendor productType status tags totalInventory
         featuredImage { url }
         priceRangeV2 {
           minVariantPrice { amount }
@@ -89,9 +94,13 @@ async function syncProducts(shop: ShopRow, token: string): Promise<{ products: n
   let variants = 0;
 
   for (let page = 0; page < 40; page++) {
-    const data: ProductsPage = await shopifyGraphQL<ProductsPage>(shop.shopify_domain, token, PRODUCTS_QUERY, {
-      cursor,
-    });
+    const data: ProductsPage = await shopifyGraphQL<ProductsPage>(
+      shop.shopify_domain,
+      token,
+      PRODUCTS_QUERY,
+      { cursor },
+      shop.api_version ?? SHOPIFY_API_VERSION
+    );
     for (const node of data.products.nodes) {
       const costs = node.variants.nodes
         .map((v) => Number(v.inventoryItem?.unitCost?.amount ?? 0))
@@ -103,6 +112,7 @@ async function syncProducts(shop: ShopRow, token: string): Promise<{ products: n
         vendor: node.vendor || undefined,
         productType: node.productType || undefined,
         status: node.status.toLowerCase(),
+        tags: node.tags.length > 0 ? node.tags.join(", ") : undefined,
         imageUrl: node.featuredImage?.url,
         priceMin: Number(node.priceRangeV2.minVariantPrice.amount),
         priceMax: Number(node.priceRangeV2.maxVariantPrice.amount),
@@ -140,7 +150,9 @@ async function syncOrders(
     token,
     "orders.json",
     { status: "any", limit: "250", created_at_min: since },
-    (body) => (body as { orders?: ShopifyOrderPayload[] }).orders ?? []
+    (body) => (body as { orders?: ShopifyOrderPayload[] }).orders ?? [],
+    20,
+    shop.api_version ?? SHOPIFY_API_VERSION
   );
 
   let orders = 0;
@@ -160,25 +172,28 @@ async function syncOrders(
 
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
-export async function runSync(shop: ShopRow, rangeDays = 30): Promise<SyncResult> {
+export async function runSync(shop: ShopRow, rangeDays = 30, scope: SyncScope = "all"): Promise<SyncResult> {
+  const startedAt = Date.now();
+  const empty = { products: 0, variants: 0, orders: 0, lineItems: 0, refunds: 0, customers: 0 };
+
   const token = await getAccessToken(shop.id);
   if (!token) {
     return {
       status: "error",
-      products: 0,
-      variants: 0,
-      orders: 0,
-      lineItems: 0,
-      refunds: 0,
-      customers: 0,
+      scope,
+      ...empty,
+      durationMs: Date.now() - startedAt,
       errorMessage: "Token Shopify manquant ou indéchiffrable — reconnectez la boutique.",
     };
   }
 
   const runId = await createSyncRun(shop.id, rangeDays);
   try {
-    const productResult = await syncProducts(shop, token);
-    const orderResult = await syncOrders(shop, token, rangeDays);
+    const productResult = scope !== "orders" ? await syncProducts(shop, token) : { products: 0, variants: 0 };
+    const orderResult =
+      scope !== "products"
+        ? await syncOrders(shop, token, rangeDays)
+        : { orders: 0, lineItems: 0, refunds: 0, customers: 0 };
 
     await finishSyncRun(runId, {
       status: "success",
@@ -194,26 +209,19 @@ export async function runSync(shop: ShopRow, rangeDays = 30): Promise<SyncResult
 
     return {
       status: "success",
+      scope,
       products: productResult.products,
       variants: productResult.variants,
       orders: orderResult.orders,
       lineItems: orderResult.lineItems,
       refunds: orderResult.refunds,
       customers: orderResult.customers,
+      durationMs: Date.now() - startedAt,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur de synchronisation inconnue";
     console.error(`[sync] ${shop.shopify_domain} :`, message);
     await finishSyncRun(runId, { status: "error", errorMessage: message });
-    return {
-      status: "error",
-      products: 0,
-      variants: 0,
-      orders: 0,
-      lineItems: 0,
-      refunds: 0,
-      customers: 0,
-      errorMessage: message,
-    };
+    return { status: "error", scope, ...empty, durationMs: Date.now() - startedAt, errorMessage: message };
   }
 }

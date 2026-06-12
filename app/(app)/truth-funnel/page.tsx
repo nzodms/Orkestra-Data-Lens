@@ -12,6 +12,7 @@ import { computeDiscrepancies } from "@/lib/discrepancies";
 import {
   computeRawFunnel,
   computeVerifiedFunnel,
+  ordersInPeriod,
   parsePeriod,
   PERIOD_LABELS,
   sessionsInPeriod,
@@ -27,7 +28,52 @@ export default async function TruthFunnelPage({
   const period = parsePeriod((await searchParams).period);
   const { dataset, mode, status, liveEmpty } = await getActiveDataset();
   if (mode === "live" && liveEmpty) {
-    return <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />;
+    // Mode live sans événements pixel : on montre la structure du funnel et
+    // les commandes Shopify réelles, sans simuler de comportement.
+    const confirmedOrders = ordersInPeriod(dataset.orders, "7d").length;
+    return (
+      <div className="space-y-4">
+        <Card className="border-brand/15 bg-brand-soft/30">
+          <div className="flex items-start gap-3.5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+              <GitCompareArrows size={18} />
+            </span>
+            <div>
+              <h2 className="text-[15px] font-semibold tracking-tight">
+                Le funnel comportemental attend les premiers événements
+              </h2>
+              <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-soft">
+                Votre boutique est connectée : {confirmedOrders} commande{confirmedOrders > 1 ? "s" : ""} Shopify
+                confirmée{confirmedOrders > 1 ? "s" : ""} sur 7 jours. Les étapes vues produit → ajout panier →
+                checkout → paiement seront reconstruites session par session dès que le pixel enverra des événements
+                — rien n&apos;est simulé en mode live.
+              </p>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <CardTitle sub="Structure du funnel vérifié — alimentée dès les premiers événements pixel.">
+            Funnel en attente de données
+          </CardTitle>
+          <FunnelSteps
+            color="rgba(20,24,31,0.25)"
+            rows={[
+              { label: "Sessions trackées", value: 0 },
+              { label: "Vues produit", value: 0 },
+              { label: "Ajouts panier", value: 0 },
+              { label: "Checkouts", value: 0 },
+              { label: "Paiements atteints", value: 0 },
+              { label: "Commandes confirmées Shopify (7 j)", value: confirmedOrders },
+            ]}
+          />
+          <p className="mt-3 rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
+            Installez le pixel ou envoyez un événement test depuis Paramètres pour vérifier le pipeline
+            (`POST /api/tracking/event`).
+          </p>
+        </Card>
+        <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />
+      </div>
+    );
   }
   const sessions = sessionsInPeriod(dataset.sessions, period);
   const raw = computeRawFunnel(sessions);

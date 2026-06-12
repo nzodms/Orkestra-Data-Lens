@@ -12,7 +12,7 @@ import type {
   TrackingEvent,
   VisitorSession,
 } from "@/lib/types";
-import { query } from "./db";
+import { query, queryOne } from "./db";
 import { env, isDatabaseConfigured, isOAuthConfigured } from "./env";
 import {
   getConnectedShop,
@@ -43,11 +43,20 @@ export type AppStatus = {
     | "database_not_configured"
     | "no_shop_connected"
     | "database_error"
-    | "token_missing";
+    | "token_missing"
+    | "demo_forced";
   shopDomain?: string;
   shopName?: string;
   apiStatus?: ShopRow["api_status"];
+  apiError?: string | null;
+  connectionMethod?: ShopRow["connection_method"];
+  apiVersion?: string | null;
+  tokenHint?: string | null;
+  tokenPresent?: boolean;
+  lastApiCheckAt?: string | null;
+  dataMode?: ShopRow["data_mode"];
   pixelStatus?: ShopRow["pixel_status"];
+  pixelInstalledAt?: string | null;
   installedScopes?: string[];
   missingScopes?: string[];
   webPixelId?: string | null;
@@ -75,17 +84,38 @@ export const getAppStatus = cache(async (): Promise<AppStatus> => {
     return { mode: "demo", reason: isOAuthConfigured() ? "no_shop_connected" : "oauth_not_configured" };
   }
 
-  const [lastSync, stats] = await Promise.all([getLastSyncRun(shop.id), getShopStats(shop.id)]);
-  const requested = env.shopifyScopes.split(",").map((s) => s.trim()).filter(Boolean);
+  const [lastSync, stats, tokenRow] = await Promise.all([
+    getLastSyncRun(shop.id),
+    getShopStats(shop.id),
+    queryOne<{ id: string }>("select id from shopify_tokens where shop_id = $1", [shop.id]),
+  ]);
+  // Pour une connexion par token manuel, les scopes de référence sont
+  // ceux du token ; pour l'OAuth, ceux demandés par l'app.
+  const requested =
+    shop.connection_method === "manual_token"
+      ? ["read_products", "read_orders"]
+      : env.shopifyScopes.split(",").map((s) => s.trim()).filter(Boolean);
   const installed = (shop.installed_scopes ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+  // Bascule explicite « Revenir au mode démo » : la boutique reste
+  // connectée mais l'interface affiche les données de démonstration.
+  const mode: AppMode = shop.data_mode === "demo" ? "demo" : "live";
+
   return {
-    mode: "live",
-    reason: "connected",
+    mode,
+    reason: mode === "demo" ? "demo_forced" : "connected",
     shopDomain: shop.shopify_domain,
     shopName: shop.name ?? shop.shopify_domain,
     apiStatus: shop.api_status,
+    apiError: shop.api_error,
+    connectionMethod: shop.connection_method,
+    apiVersion: shop.api_version,
+    tokenHint: shop.token_hint,
+    tokenPresent: tokenRow != null,
+    lastApiCheckAt: shop.last_api_check_at,
+    dataMode: shop.data_mode,
     pixelStatus: shop.pixel_status,
+    pixelInstalledAt: shop.pixel_installed_at,
     installedScopes: installed,
     missingScopes: requested.filter((s) => !installed.includes(s)),
     webPixelId: shop.web_pixel_id,

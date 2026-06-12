@@ -1,16 +1,9 @@
-"use client";
-
-import { motion } from "framer-motion";
-
-/** Transition douce entre les pages de l'app (remontée + fondu). */
+/**
+ * Transition de page en CSS pur (animation `fade-up`) : contrairement à une
+ * animation Framer Motion avec `initial={{ opacity: 0 }}`, le contenu reste
+ * visible même si l'hydratation JS est lente — plus aucune section du bas de
+ * page qui « n'apparaît pas » tant que le JS n'est pas chargé.
+ */
 export default function Template({ children }: { children: React.ReactNode }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28, ease: [0.21, 0.61, 0.35, 1] }}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className="fade-up">{children}</div>;
 }

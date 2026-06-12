@@ -1,5 +1,71 @@
 # Changelog — Orkestra Data Lens
 
+## [0.6.0] — Live Shopify : connexion réelle, données réelles, statut strict
+
+### Connexion boutique (Paramètres + onboarding)
+- **Option A — OAuth Shopify officiel** (inchangé : HMAC, state anti-CSRF,
+  token chiffré, webhooks + pixel automatiques).
+- **Option B — Token Admin API manuel** : domaine + token `shpat_…` +
+  version d'API, bouton **« Tester la connexion »** (vraies requêtes
+  `shop.json` + `access_scopes.json`, résultat réel : connecté / token
+  invalide / domaine introuvable / **scopes insuffisants** listés) puis
+  **« Connecter la boutique »**. Aucune app publiée nécessaire.
+- Sécurité : token chiffré AES-256-GCM, **jamais renvoyé au client**, seul
+  `••••••••1234` est affiché ; validation du domaine `*.myshopify.com` et
+  du préfixe de token ; logs sans token.
+- **« Déconnecter la boutique »** avec confirmation : token toujours
+  supprimé, données synchronisées conservées sauf case explicite
+  « tout supprimer ».
+
+### Statut live strict dans toute l'app
+- Badges précis : Mode démo — données simulées · **Mode live — boutique
+  connectée** · Connexion invalide · Token manquant · Scopes insuffisants ·
+  Synchronisation en cours · dernière sync · dernière commande · dernier
+  événement tracking.
+- **Switch Mode démo / Mode live** dans Paramètres (`data_mode` en base) —
+  jamais de mélange silencieux : live = vraies données uniquement, demo =
+  jeu de démonstration clairement identifié.
+
+### Synchronisation réelle enrichie
+- Produits : + **tags** ; commandes : + **subtotal, remises, taxes,
+  livraison** ; version d'API par boutique.
+- Panneau de sync : **Resynchroniser 30 j / 7 j / produits uniquement /
+  commandes uniquement**, avec progression réelle (compteurs produits/
+  variantes/commandes/lignes/remboursements/clients + **durée**) et
+  dernière erreur affichée.
+
+### Pages en mode live sans pixel — zéro donnée inventée
+- **Dashboard live commerce** : CA confirmé 30 j/7 j, commandes, panier
+  moyen, remboursements, produits vendus, commandes non expédiées, top
+  produits, dernière commande, CA quotidien 30 j — 100 % Shopify ; vues
+  produit / ajouts panier affichés « — En attente du pixel » avec bannière
+  explicite.
+- **Vérité du tunnel live** : structure du funnel affichée, commandes
+  Shopify réelles, mention « rien n'est simulé en mode live ».
+- Produits : **vraie image Shopify** dans la table.
+
+### Diagnostic & test
+- Carte **« Diagnostic Shopify »** dans Paramètres : domaine, token
+  présent/sécurisé, scopes produits/commandes/remboursements, test API,
+  dernière sync, pixel, dernier event — chaque ligne avec statut et action.
+- Pixel : ID Shopify, **dernière installation**, dernier événement, erreur
+  exacte (dont « Extension Web Pixel non déployée — `shopify app deploy` »),
+  boutons Réinstaller + **« Envoyer un événement test »** (vrai POST sur
+  `/api/tracking/event`, visible ensuite dans Parcours visiteurs).
+- `docs/TRACKING.md` : payload d'exemple et comportement de l'endpoint.
+
+### Corrections
+- **Bug dashboard sections basses** : la transition de page Framer Motion
+  (`opacity: 0` initial) pouvait laisser le contenu invisible si
+  l'hydratation JS tardait — remplacée par une animation CSS pure : le
+  contenu est toujours visible, sans flicker.
+- Migration `0005_live_connection.sql` (idempotente) : `connection_method`,
+  `api_version`, `token_hint`, `api_error`, `last_api_check_at`,
+  `data_mode`, `pixel_installed_at`, `products.tags`, champs financiers
+  commandes.
+
+---
+
 ## [0.5.0] — V1.5 : Daily Operations Cockpit
 
 ### Cockpit « Aujourd'hui » (nouvelle page d'accueil)

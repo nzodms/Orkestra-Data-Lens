@@ -7,8 +7,10 @@ import { InsightCard } from "@/components/domain/InsightCard";
 import { ReliabilityPanel } from "@/components/domain/ReliabilityPanel";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
-import { LiveEmptyState } from "@/components/domain/LiveEmptyState";
+import { LiveCommerceDashboard } from "@/components/domain/LiveCommerceDashboard";
+import { getCommerceSummary } from "@/lib/server/commerce";
 import { getActiveDataset } from "@/lib/server/datasource";
+import { getConnectedShop } from "@/lib/server/repo";
 import {
   computeRawFunnel,
   computeVerifiedFunnel,
@@ -31,7 +33,13 @@ export default async function DashboardPage({
   const period = parsePeriod((await searchParams).period);
   const { dataset, mode, status, liveEmpty } = await getActiveDataset();
   if (mode === "live" && liveEmpty) {
-    return <LiveEmptyState pixelInstalled={status.pixelStatus === "installed"} />;
+    // Boutique connectée mais aucun événement pixel : dashboard 100 % Shopify
+    // (CA, commandes, remboursements réels) — aucune métrique comportementale inventée.
+    const shop = await getConnectedShop();
+    const summary = shop ? await getCommerceSummary(shop.id) : null;
+    if (summary) {
+      return <LiveCommerceDashboard summary={summary} pixelInstalled={status.pixelStatus === "installed"} />;
+    }
   }
   const sessions = sessionsInPeriod(dataset.sessions, period);
   const orders = ordersInPeriod(dataset.orders, period);

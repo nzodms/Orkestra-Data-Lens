@@ -16,6 +16,7 @@ import {
   Store,
   XCircle,
 } from "lucide-react";
+import { ConnectShopify } from "@/components/settings/ConnectShopify";
 import { cn } from "@/lib/utils";
 
 const STEPS = ["Bienvenue", "Connecter Shopify", "Installer le tracking", "Synchronisation", "Première analyse"];
@@ -62,6 +63,7 @@ type SyncState =
 
 export function OnboardingFlow({
   oauthConfigured,
+  manualAvailable = false,
   initialStep,
   connectedShopDomain,
   errorCode,
@@ -69,6 +71,7 @@ export function OnboardingFlow({
   pixelInstalled,
 }: {
   oauthConfigured: boolean;
+  manualAvailable?: boolean;
   initialStep: number;
   connectedShopDomain?: string;
   errorCode?: string;
@@ -292,10 +295,27 @@ export function OnboardingFlow({
               )}
               {!oauthConfigured && !demoConnected && (
                 <p className="mt-3 text-[11.5px] leading-relaxed text-ink-soft">
-                  OAuth réel indisponible sur cet environnement : renseignez les variables de{" "}
-                  <code className="rounded bg-gray-100 px-1 text-[10.5px]">.env.example</code> puis relancez. Vous
-                  pouvez continuer en mode démo.
+                  OAuth d&apos;app Shopify indisponible sur cet environnement (variables non configurées).
+                  {manualAvailable
+                    ? " Utilisez la connexion par token Admin API ci-dessous — aucune app publiée nécessaire."
+                    : " Vous pouvez continuer en mode démo."}
                 </p>
+              )}
+
+              {/* Option B — token Admin API manuel (test immédiat) */}
+              {manualAvailable && !live && (
+                <div className="mt-5 border-t border-ink/5 pt-4">
+                  <div className="mb-2 text-[12.5px] font-semibold">
+                    Ou connexion rapide par token Admin API
+                  </div>
+                  <p className="mb-3 text-[11.5px] leading-relaxed text-ink-soft">
+                    Admin Shopify → Paramètres → Applications → Développer des apps → créez une app custom avec{" "}
+                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_products</code> et{" "}
+                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_orders</code>, puis collez le token{" "}
+                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>.
+                  </p>
+                  <ConnectShopify oauthConfigured={false} manualAvailable compact />
+                </div>
               )}
 
               <div className="mt-5 rounded-xl border border-gray-200/70 bg-gray-50/70 p-4">

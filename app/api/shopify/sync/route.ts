@@ -32,10 +32,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json().catch(() => ({}))) as { rangeDays?: number };
+  const body = (await req.json().catch(() => ({}))) as { rangeDays?: number; scope?: string };
   const rangeDays = Math.min(90, Math.max(1, Number(body.rangeDays ?? 30)));
+  const scope = body.scope === "products" || body.scope === "orders" ? body.scope : "all";
 
-  const result = await runSync(shop, rangeDays);
+  const result = await runSync(shop, rangeDays, scope);
   return NextResponse.json(
     {
       mode: "live",

@@ -29,6 +29,14 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(env.databaseUrl);
 }
 
+/**
+ * La connexion par token Admin API manuel ne nécessite NI app Shopify
+ * publiée NI OAuth : seulement la base et le secret de chiffrement.
+ */
+export function isManualConnectAvailable(): boolean {
+  return Boolean(env.databaseUrl && env.encryptionSecret && env.encryptionSecret.length >= 32);
+}
+
 export type ConfigIssue = { key: string; message: string };
 
 export function configIssues(): ConfigIssue[] {

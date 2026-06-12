@@ -96,13 +96,22 @@ export function ProductsTable({
               >
                 <td className="py-3 pr-3">
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-white to-ink/10 text-[10px] font-bold text-ink-soft shadow-sm ring-1 ring-ink/5">
-                      {s.product.title
-                        .split(" ")
-                        .slice(0, 2)
-                        .map((w) => w[0])
-                        .join("")}
-                    </span>
+                    {s.product.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.product.imageUrl}
+                        alt=""
+                        className="h-8 w-8 shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-ink/5"
+                      />
+                    ) : (
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-white to-ink/10 text-[10px] font-bold text-ink-soft shadow-sm ring-1 ring-ink/5">
+                        {s.product.title
+                          .split(" ")
+                          .slice(0, 2)
+                          .map((w) => w[0])
+                          .join("")}
+                      </span>
+                    )}
                     <div>
                       <div className="font-semibold leading-tight">{s.product.title}</div>
                       <div className="num text-[10.5px] text-ink-soft">{formatEUR(s.product.priceMin)}</div>

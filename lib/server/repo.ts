@@ -16,9 +16,16 @@ export type ShopRow = {
   pixel_status: "installed" | "not_installed" | "installing" | "error" | "demo";
   web_pixel_id: string | null;
   pixel_error: string | null;
+  pixel_installed_at: string | null;
   installed_scopes: string | null;
   connected_at: string | null;
   uninstalled_at: string | null;
+  connection_method: "oauth" | "manual_token";
+  api_version: string | null;
+  token_hint: string | null;
+  api_error: string | null;
+  last_api_check_at: string | null;
+  data_mode: "live" | "demo";
 };
 
 export type SyncRunRow = {
@@ -43,11 +50,16 @@ export async function getShopByDomain(domain: string): Promise<ShopRow | null> {
   return queryOne<ShopRow>("select * from shops where shopify_domain = $1", [domain]);
 }
 
-/** Boutique live active (V1 mono-boutique : la dernière connectée). */
+/**
+ * Boutique live active (V1 mono-boutique : la dernière connectée).
+ * Inclut les boutiques en erreur API : leurs données synchronisées restent
+ * valides et l'interface affiche « Connexion invalide » plutôt que de
+ * retomber silencieusement en démo.
+ */
 export async function getConnectedShop(): Promise<ShopRow | null> {
   return queryOne<ShopRow>(
     `select * from shops
-     where api_status = 'connected' and is_demo = false
+     where api_status in ('connected', 'error') and is_demo = false
      order by connected_at desc nulls last limit 1`
   );
 }
@@ -181,6 +193,7 @@ export type NormalizedProduct = {
   productType?: string;
   status: string;
   imageUrl?: string;
+  tags?: string;
   priceMin: number;
   priceMax: number;
   cost?: number;
@@ -198,13 +211,13 @@ export type NormalizedProduct = {
 
 export async function upsertProduct(shopId: string, p: NormalizedProduct): Promise<number> {
   const row = await queryOne<{ id: string }>(
-    `insert into products (shop_id, shopify_product_id, title, handle, vendor, product_type, status, image_url, price_min, price_max, cost, stock, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+    `insert into products (shop_id, shopify_product_id, title, handle, vendor, product_type, status, image_url, price_min, price_max, cost, stock, tags, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
      on conflict (shop_id, shopify_product_id) do update set
        title = excluded.title, handle = excluded.handle, vendor = excluded.vendor,
        product_type = excluded.product_type, status = excluded.status, image_url = excluded.image_url,
        price_min = excluded.price_min, price_max = excluded.price_max,
-       cost = excluded.cost, stock = excluded.stock, updated_at = now()
+       cost = excluded.cost, stock = excluded.stock, tags = excluded.tags, updated_at = now()
      returning id`,
     [
       shopId,
@@ -219,6 +232,7 @@ export async function upsertProduct(shopId: string, p: NormalizedProduct): Promi
       p.priceMax,
       p.cost ?? null,
       p.stock ?? null,
+      p.tags ?? null,
     ]
   );
   let variants = 0;
@@ -256,6 +270,10 @@ export type ShopifyOrderPayload = {
   processed_at?: string | null;
   cancelled_at?: string | null;
   total_price?: string | number;
+  subtotal_price?: string | number;
+  total_discounts?: string | number;
+  total_tax?: string | number;
+  total_shipping_price_set?: { shop_money?: { amount?: string | number } } | null;
   currency?: string;
   financial_status?: string;
   fulfillment_status?: string | null;
@@ -319,13 +337,18 @@ export async function upsertOrderFromPayload(
   const order = await queryOne<{ id: string }>(
     `insert into orders (shop_id, shopify_order_id, order_number, created_at_shopify, processed_at, cancelled_at,
         total_price, currency, financial_status, fulfillment_status, cart_token, checkout_token, customer_id,
-        source_name, referring_site, landing_site, country, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$17,$10,$11,$12,$13,$14,$15,$16, now())
+        source_name, referring_site, landing_site, country,
+        subtotal_price, total_discounts, total_tax, total_shipping, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$17,$10,$11,$12,$13,$14,$15,$16,$18,$19,$20,$21, now())
      on conflict (shop_id, shopify_order_id) do update set
        order_number = excluded.order_number, processed_at = excluded.processed_at,
        cancelled_at = excluded.cancelled_at, total_price = excluded.total_price,
        financial_status = excluded.financial_status,
        fulfillment_status = excluded.fulfillment_status,
+       subtotal_price = excluded.subtotal_price,
+       total_discounts = excluded.total_discounts,
+       total_tax = excluded.total_tax,
+       total_shipping = excluded.total_shipping,
        cart_token = coalesce(excluded.cart_token, orders.cart_token),
        checkout_token = coalesce(excluded.checkout_token, orders.checkout_token),
        customer_id = coalesce(excluded.customer_id, orders.customer_id),
@@ -353,6 +376,12 @@ export async function upsertOrderFromPayload(
       payload.landing_site ?? null,
       payload.shipping_address?.country_code ?? payload.customer?.default_address?.country_code ?? null,
       payload.fulfillment_status ?? null,
+      payload.subtotal_price != null ? Number(payload.subtotal_price) : null,
+      payload.total_discounts != null ? Number(payload.total_discounts) : null,
+      payload.total_tax != null ? Number(payload.total_tax) : null,
+      payload.total_shipping_price_set?.shop_money?.amount != null
+        ? Number(payload.total_shipping_price_set.shop_money.amount)
+        : null,
     ]
   );
 
@@ -504,6 +533,89 @@ export async function replaceAnomalies(
         a.probableCause ?? null,
         a.recommendedAction ?? null,
       ]
+    );
+  }
+}
+
+// ─── Connexion manuelle par token Admin API (Option B) ───────────────────────
+
+export async function upsertManualConnection(input: {
+  domain: string;
+  name?: string;
+  currency?: string;
+  timezone?: string;
+  scopes: string[];
+  accessToken: string;
+  apiVersion: string;
+}): Promise<ShopRow> {
+  const tokenHint = `••••••••${input.accessToken.slice(-4)}`;
+  const shop = await queryOne<ShopRow>(
+    `insert into shops (shopify_domain, name, currency, timezone, api_status, installed_scopes,
+        connected_at, uninstalled_at, connection_method, api_version, token_hint, api_error,
+        last_api_check_at, data_mode, updated_at)
+     values ($1, $2, coalesce($3,'EUR'), coalesce($4,'Europe/Paris'), 'connected', $5,
+        now(), null, 'manual_token', $6, $7, null, now(), 'live', now())
+     on conflict (shopify_domain) do update set
+       name = coalesce(excluded.name, shops.name),
+       currency = coalesce($3, shops.currency),
+       timezone = coalesce($4, shops.timezone),
+       api_status = 'connected',
+       installed_scopes = excluded.installed_scopes,
+       connected_at = now(),
+       uninstalled_at = null,
+       connection_method = 'manual_token',
+       api_version = excluded.api_version,
+       token_hint = excluded.token_hint,
+       api_error = null,
+       last_api_check_at = now(),
+       data_mode = 'live',
+       updated_at = now()
+     returning *`,
+    [input.domain, input.name ?? null, input.currency ?? null, input.timezone ?? null,
+      input.scopes.join(","), input.apiVersion, tokenHint]
+  );
+  await query(
+    `insert into shopify_tokens (shop_id, encrypted_token, scopes, updated_at)
+     values ($1, $2, $3, now())
+     on conflict (shop_id) do update set
+       encrypted_token = excluded.encrypted_token,
+       scopes = excluded.scopes,
+       updated_at = now()`,
+    [shop!.id, encryptSecret(input.accessToken), input.scopes.join(",")]
+  );
+  return shop!;
+}
+
+export async function updateShopApiCheck(shopId: string, ok: boolean, error?: string): Promise<void> {
+  await query(
+    `update shops set last_api_check_at = now(),
+       api_error = $2,
+       api_status = case when $3 then 'connected' else 'error' end,
+       updated_at = now()
+     where id = $1`,
+    [shopId, error ?? null, ok]
+  );
+}
+
+export async function setDataMode(shopId: string, mode: "live" | "demo"): Promise<void> {
+  await query(`update shops set data_mode = $2, updated_at = now() where id = $1`, [shopId, mode]);
+}
+
+/**
+ * Déconnexion explicite : token supprimé, boutique repassée en
+ * « disconnected ». Les données synchronisées ne sont supprimées que si
+ * deleteData est demandé explicitement.
+ */
+export async function disconnectShop(shopId: string, deleteData: boolean): Promise<void> {
+  await query("delete from shopify_tokens where shop_id = $1", [shopId]);
+  if (deleteData) {
+    await query("delete from shops where id = $1", [shopId]); // cascade sur toutes les tables
+  } else {
+    await query(
+      `update shops set api_status = 'disconnected', pixel_status = 'not_installed',
+         token_hint = null, api_error = null, uninstalled_at = now(), updated_at = now()
+       where id = $1`,
+      [shopId]
     );
   }
 }

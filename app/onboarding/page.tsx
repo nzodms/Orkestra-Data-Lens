@@ -1,6 +1,6 @@
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { getAppStatus } from "@/lib/server/datasource";
-import { isDatabaseConfigured, isOAuthConfigured } from "@/lib/server/env";
+import { isDatabaseConfigured, isManualConnectAvailable, isOAuthConfigured } from "@/lib/server/env";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +19,14 @@ export default async function OnboardingPage({
   const oauthReady = isOAuthConfigured() && isDatabaseConfigured();
 
   const connectedDomain =
-    params.connected === "1" && params.shop ? params.shop : status.mode === "live" ? status.shopDomain : undefined;
+    params.connected === "1" && params.shop ? params.shop : status.shopDomain ?? undefined;
 
   const initialStep = Math.min(4, Math.max(0, Number(params.step ?? (connectedDomain ? 2 : 0)) || 0));
 
   return (
     <OnboardingFlow
       oauthConfigured={oauthReady}
+      manualAvailable={isManualConnectAvailable()}
       initialStep={initialStep}
       connectedShopDomain={connectedDomain}
       errorCode={params.error}

@@ -30,6 +30,7 @@ async function setPixelState(
     `update shops set pixel_status = $2,
        web_pixel_id = coalesce($3, web_pixel_id),
        pixel_error = $4,
+       pixel_installed_at = case when $2 = 'installed' then now() else pixel_installed_at end,
        updated_at = now()
      where id = $1`,
     [shopId, state.status, state.webPixelId ?? null, state.error ?? null]
