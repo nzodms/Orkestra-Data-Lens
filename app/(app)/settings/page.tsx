@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Card, CardTitle } from "@/components/ui/Card";
+import { PixelButton } from "@/components/domain/PixelButton";
 import { SyncButton } from "@/components/domain/SyncButton";
 import { getActiveDataset } from "@/lib/server/datasource";
 import { formatDateTime, formatNumber } from "@/lib/utils";
@@ -155,7 +156,7 @@ export default async function SettingsPage() {
         <div className="space-y-4">
           {/* Pixel */}
           <Card>
-            <CardTitle sub="Web Pixel Shopify chargé sur la boutique pour capter chaque événement horodaté.">
+            <CardTitle sub="Web Pixel Shopify activé automatiquement après la connexion OAuth (webPixelCreate).">
               <span className="inline-flex items-center gap-1.5">
                 <Radio size={15} className="text-ink-soft" /> Pixel de tracking
               </span>
@@ -163,7 +164,11 @@ export default async function SettingsPage() {
             <div className="flex flex-wrap items-center gap-2">
               {live ? (
                 status.pixelStatus === "installed" ? (
-                  <Badge tone="green">Pixel actif</Badge>
+                  <Badge tone="green">Pixel installé</Badge>
+                ) : status.pixelStatus === "installing" ? (
+                  <Badge tone="blue">Installation en cours</Badge>
+                ) : status.pixelStatus === "error" ? (
+                  <Badge tone="red">Erreur installation pixel</Badge>
                 ) : (
                   <Badge tone="orange">Pixel non installé</Badge>
                 )
@@ -171,7 +176,19 @@ export default async function SettingsPage() {
                 <Badge tone="orange">Pixel en mode démo</Badge>
               )}
               <Badge tone="blue">Endpoint : /api/tracking/event</Badge>
+              {live && status.webPixelId && (
+                <Badge tone="neutral" className="max-w-56 truncate">
+                  {status.webPixelId}
+                </Badge>
+              )}
             </div>
+            {live && status.pixelError && (
+              <p className="mt-2 rounded-lg bg-critical-soft px-2.5 py-1.5 text-[11.5px] font-medium text-critical">
+                {status.pixelError}
+                {/extension/i.test(status.pixelError) &&
+                  " — déployez l'extension web pixel (extensions/orkestra-pixel) avec `shopify app deploy`, puis réinstallez."}
+              </p>
+            )}
             <div className="mt-3 text-[12px] text-ink-soft">
               {live ? (
                 status.lastEventAt ? (
@@ -180,12 +197,17 @@ export default async function SettingsPage() {
                     Dernier événement reçu : {formatDateTime(status.lastEventAt)}
                   </span>
                 ) : (
-                  "Aucun événement reçu pour l'instant. Déployez l'extension (dossier extensions/orkestra-pixel) puis activez le pixel."
+                  "Aucun événement reçu pour l'instant : le statut passera à « installé » dès le premier événement si l'activation automatique a échoué."
                 )
               ) : (
                 "En mode démo, les événements affichés sont simulés."
               )}
             </div>
+            {live && (
+              <div className="mt-3">
+                <PixelButton installed={status.pixelStatus === "installed"} />
+              </div>
+            )}
           </Card>
 
           {/* Webhooks */}

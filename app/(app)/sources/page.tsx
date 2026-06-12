@@ -52,7 +52,17 @@ export default async function SourcesPage({
                     <span className="font-semibold">{s.label}</span>
                     {s.key === "unknown" && (
                       <Badge tone="orange" className="ml-1.5">
-                        UTM manquants
+                        Polluée · UTM manquants
+                      </Badge>
+                    )}
+                    {s.orders > 0 && s.qualityScore >= 55 && (
+                      <Badge tone="green" className="ml-1.5">
+                        Rentable
+                      </Badge>
+                    )}
+                    {s.key !== "unknown" && s.sessions >= 10 && s.qualityScore < 35 && (
+                      <Badge tone="red" className="ml-1.5">
+                        Peu qualifiée
                       </Badge>
                     )}
                   </td>

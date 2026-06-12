@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySignedState } from "@/lib/server/crypto";
 import { isDatabaseConfigured, isOAuthConfigured } from "@/lib/server/env";
+import { ensureWebPixel } from "@/lib/server/pixel";
 import { upsertConnectedShop } from "@/lib/server/repo";
 import {
   exchangeCodeForToken,
@@ -72,6 +73,14 @@ export async function GET(req: NextRequest) {
     const webhookResult = await registerWebhooks(shopDomain, accessToken);
     if (webhookResult.errors.length > 0) {
       console.warn(`[oauth] Webhooks partiellement enregistrés pour ${shopDomain} :`, webhookResult.errors);
+    }
+
+    // 7. Activation automatique du Web Pixel (scope write_pixels).
+    // Non bloquant : en cas d'échec, le statut réel (« error ») est stocké
+    // et visible dans Settings, avec le bouton « Réinstaller le pixel ».
+    const pixel = await ensureWebPixel(shop);
+    if (pixel.status === "error") {
+      console.warn(`[oauth] Pixel non installé pour ${shopDomain} : ${pixel.error}`);
     }
 
     console.log(`[oauth] Boutique connectée : ${shopDomain} (shop_id=${shop.id}, scopes=${scopes})`);

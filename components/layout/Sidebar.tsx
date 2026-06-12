@@ -23,7 +23,7 @@ export default function Sidebar({
   const qs = period ? `?period=${period}` : "";
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-gray-200/70 bg-white/70 backdrop-blur-xl md:flex">
+    <aside className="glass fixed bottom-3 left-3 top-3 z-30 hidden w-60 flex-col overflow-y-auto rounded-2xl md:flex">
       <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-ai text-white shadow-sm">
           <Sparkles size={17} strokeWidth={2.2} />
@@ -43,13 +43,17 @@ export default function Sidebar({
               key={item.href}
               href={`${item.href}${qs}`}
               className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13.5px] font-medium transition-all",
+                "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13.5px] font-medium transition-all duration-200",
                 active
-                  ? "bg-brand-soft text-brand-strong shadow-[inset_0_0_0_1px_rgba(42,91,215,0.12)]"
-                  : "text-ink-soft hover:bg-gray-100/80 hover:text-ink"
+                  ? "bg-white/85 text-brand-strong shadow-[0_1px_2px_rgba(18,25,43,0.06),0_4px_12px_-6px_rgba(18,25,43,0.12),inset_0_1px_0_rgba(255,255,255,0.9)] ring-1 ring-ink/5"
+                  : "text-ink-soft hover:bg-white/55 hover:text-ink"
               )}
             >
-              <Icon size={17} strokeWidth={active ? 2.2 : 1.9} />
+              <Icon
+                size={17}
+                strokeWidth={active ? 2.2 : 1.9}
+                className={cn("transition-transform duration-200", !active && "group-hover:scale-110")}
+              />
               <span className="flex-1">{item.label}</span>
               {item.href === "/anomalies" && anomalyCount > 0 && (
                 <span className="rounded-full bg-warn-soft px-1.5 py-0.5 text-[10.5px] font-semibold text-warn num">
@@ -61,7 +65,7 @@ export default function Sidebar({
         })}
       </nav>
 
-      <div className="m-3 rounded-xl border border-gray-200/80 bg-gray-50/80 p-3">
+      <div className="inset-panel m-3 p-3">
         <div className="flex items-center gap-2">
           <span className={cn("h-2 w-2 rounded-full pulse-dot", mode === "live" ? "bg-positive" : "bg-warn")} />
           <span

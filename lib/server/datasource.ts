@@ -50,6 +50,8 @@ export type AppStatus = {
   pixelStatus?: ShopRow["pixel_status"];
   installedScopes?: string[];
   missingScopes?: string[];
+  webPixelId?: string | null;
+  pixelError?: string | null;
   lastSync?: SyncRunRow | null;
   syncRunning?: boolean;
   stats?: ShopStats;
@@ -86,6 +88,8 @@ export const getAppStatus = cache(async (): Promise<AppStatus> => {
     pixelStatus: shop.pixel_status,
     installedScopes: installed,
     missingScopes: requested.filter((s) => !installed.includes(s)),
+    webPixelId: shop.web_pixel_id,
+    pixelError: shop.pixel_error,
     lastSync,
     syncRunning: lastSync?.status === "running",
     stats,
@@ -203,7 +207,9 @@ async function buildLiveDataset(shop: ShopRow): Promise<Dataset> {
     timezone: shop.timezone,
     connectedAt: shop.connected_at ?? new Date().toISOString(),
     apiStatus: shop.api_status,
-    pixelStatus: shop.pixel_status === "not_installed" ? "not_installed" : shop.pixel_status,
+    // « installing » est un état transitoire propre au statut serveur ;
+    // le type Shop public reste sur les 4 états historiques.
+    pixelStatus: shop.pixel_status === "installing" ? "not_installed" : shop.pixel_status,
   };
 
   // Catalogue — l'id produit exposé est l'ID Shopify pour matcher les

@@ -35,7 +35,7 @@ export default function Topbar({ status }: { status: TopbarStatus }) {
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <header className="sticky top-0 z-20 border-b border-gray-200/60 bg-surface/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-white/50 bg-surface/65 shadow-[0_1px_0_rgba(18,25,43,0.04)] backdrop-blur-2xl">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 md:px-6">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[17px] font-semibold tracking-tight md:text-lg">{page.title}</h1>

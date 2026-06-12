@@ -118,6 +118,59 @@ export default async function TruthFunnelPage({
         </Card>
       </div>
 
+      {/* Décomposition visuelle de l'écart */}
+      {raw.paymentReached > 0 && (
+        <Card>
+          <CardTitle sub="Shopify compte ces paiements dans la même période. Data Lens identifie l'origine réelle de chacun.">
+            D&apos;où viennent les {raw.paymentReached} paiements atteints ?
+          </CardTitle>
+          {(() => {
+            const paymentSessions = sessions.filter((s) =>
+              s.events.some((e) => e.eventName === "payment_step_reached")
+            );
+            const cohort = paymentSessions.filter((s) =>
+              s.events.some(
+                (e) => e.eventName === "payment_step_reached" && e.status !== "out_of_period" && e.status !== "incomplete"
+              )
+            ).length;
+            const outOfPeriod = paymentSessions.filter((s) =>
+              s.events.some((e) => e.eventName === "payment_step_reached" && e.status === "out_of_period")
+            ).length;
+            const unknownCart = paymentSessions.length - cohort - outOfPeriod;
+            const total = Math.max(1, paymentSessions.length);
+            const segments = [
+              { label: "Parcours complet dans la période", count: cohort, color: "var(--color-positive)", soft: "bg-positive-soft text-positive" },
+              { label: "Panier créé avant la période (checkout repris)", count: outOfPeriod, color: "var(--color-warn)", soft: "bg-warn-soft text-warn" },
+              { label: "Panier d'origine inconnue (autre appareil / tracking bloqué)", count: unknownCart, color: "var(--color-critical)", soft: "bg-critical-soft text-critical" },
+            ].filter((s) => s.count > 0);
+            return (
+              <div>
+                <div className="flex h-9 w-full gap-1 overflow-hidden rounded-xl">
+                  {segments.map((seg) => (
+                    <div
+                      key={seg.label}
+                      className="grow-bar flex items-center justify-center rounded-lg text-[12px] font-bold text-white"
+                      style={{ width: `${(seg.count / total) * 100}%`, background: seg.color, minWidth: 34 }}
+                    >
+                      {seg.count}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+                  {segments.map((seg) => (
+                    <span key={seg.label} className="flex items-center gap-1.5 text-[11.5px] text-ink-soft">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: seg.color }} />
+                      <span className={`num rounded-md px-1.5 py-0.5 font-bold ${seg.soft}`}>{seg.count}</span>
+                      {seg.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
+
       {/* Écarts détectés */}
       <Card>
         <CardTitle sub="Chaque écart entre les deux funnels, identifié et expliqué — au lieu d'être caché.">

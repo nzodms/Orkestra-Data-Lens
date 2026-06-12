@@ -17,9 +17,11 @@ import {
   revenueOf,
   sessionsInPeriod,
 } from "@/lib/funnel";
-import { generateDailySummary, generateInsights } from "@/lib/insights";
+import { computeAbandonments } from "@/lib/analytics";
+import { generateDailySummary, generateInsights, generatePriorityActions } from "@/lib/insights";
 import { computeReliability } from "@/lib/scoring";
 import { dayOffsetOf, formatEUR, formatPct, formatTimeShort } from "@/lib/utils";
+import { TrendingDown, Zap } from "lucide-react";
 
 export default async function DashboardPage({
   searchParams,
@@ -57,6 +59,11 @@ export default async function DashboardPage({
 
   const lastOrder = [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const topAnomalies = dataset.anomalies.slice(0, 2);
+  const actions = generatePriorityActions(dataset, period);
+  const topAction = actions[0];
+  const abandonments = computeAbandonments(dataset, period);
+  const recoverableLoss = Math.round(abandonments.reduce((a, b) => a + b.estimatedLoss, 0));
+  const topLossCategory = [...abandonments].sort((a, b) => b.estimatedLoss - a.estimatedLoss)[0];
 
   return (
     <div className="space-y-4">
@@ -85,6 +92,62 @@ export default async function DashboardPage({
         />
         <Stat label="Checkouts commencés" value={raw.checkoutsStarted} sub={`${verified.checkoutsStarted} dans la cohorte`} />
       </div>
+
+      {/* Action du jour + pertes récupérables */}
+      {topAction && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="card card-hover relative overflow-hidden p-4 md:p-5 lg:col-span-2">
+            <span className="absolute inset-y-0 left-0 w-1 rounded-l-[1.15rem] bg-gradient-to-b from-brand to-brand-strong" />
+            <div className="flex items-start gap-3.5 pl-2">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand-strong">
+                <Zap size={18} strokeWidth={2.2} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-brand-strong">
+                  Action du jour
+                </div>
+                <h2 className="mt-0.5 text-[15.5px] font-semibold leading-snug tracking-tight">{topAction.title}</h2>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">{topAction.description}</p>
+                <p className="mt-2 border-l-2 border-brand/25 pl-2.5 text-[11.5px] italic leading-relaxed text-ink-soft">
+                  {topAction.justification}
+                </p>
+                <Link
+                  href={`/truth-funnel${period !== "today" ? `?period=${period}` : ""}`}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-ink px-3.5 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-black"
+                >
+                  Voir toutes les actions <ArrowRight size={13} />
+                </Link>
+              </div>
+              {topAction.estimatedRevenue != null && (
+                <div className="hidden shrink-0 text-right sm:block">
+                  <div className="num text-[22px] font-semibold text-positive">
+                    +{formatEUR(topAction.estimatedRevenue)}
+                  </div>
+                  <div className="text-[10.5px] text-ink-soft">impact estimé</div>
+                </div>
+              )}
+            </div>
+          </div>
+          <Link href={`/abandonments${period !== "today" ? `?period=${period}` : ""}`} className="card card-hover flex flex-col justify-between p-4 md:p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-ink-soft">
+                Pertes récupérables
+              </span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-critical-soft text-critical">
+                <TrendingDown size={13} strokeWidth={2.2} />
+              </span>
+            </div>
+            <div className="num mt-1 text-[26px] font-semibold tracking-tight text-critical">
+              {formatEUR(recoverableLoss)}
+            </div>
+            <p className="mt-1 text-[11.5px] leading-snug text-ink-soft">
+              {topLossCategory
+                ? `Principalement sur « ${topLossCategory.label.toLowerCase()} » (${formatEUR(Math.round(topLossCategory.estimatedLoss))}). Voir le plan de récupération →`
+                : "Aucune perte estimée sur la période."}
+            </p>
+          </Link>
+        </div>
+      )}
 
       {/* Résumé + fiabilité */}
       <div className="grid gap-4 lg:grid-cols-3">

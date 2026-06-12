@@ -37,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           mode={mode}
         />
       </Suspense>
-      <div className="md:pl-60">
+      <div className="md:pl-[252px]">
         <Suspense>
           <Topbar status={topbarStatus} />
         </Suspense>

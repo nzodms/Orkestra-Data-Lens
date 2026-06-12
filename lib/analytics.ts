@@ -228,6 +228,8 @@ export type AbandonmentStats = {
   topProducts: { title: string; count: number }[];
   topSources: { label: string; count: number }[];
   topHours: { hour: number; count: number }[];
+  /** Répartition complète des abandons par heure (24 entrées). */
+  hourHistogram: number[];
   topDevice?: string;
   extraMetrics: { label: string; value: string }[];
   probableCauses: string[];
@@ -275,6 +277,7 @@ export function computeAbandonments(dataset: Dataset, period: Period): Abandonme
       topProducts: topProducts(productAbandons, "product_viewed"),
       topSources: topSources(productAbandons),
       topHours: topHours(productAbandons),
+      hourHistogram: hourHistogram(productAbandons),
       topDevice: topDevice(productAbandons),
       extraMetrics: [
         { label: "Vues produit", value: String(pv.length) },
@@ -307,6 +310,7 @@ export function computeAbandonments(dataset: Dataset, period: Period): Abandonme
       topProducts: topProducts(cartAbandons, "product_added_to_cart"),
       topSources: topSources(cartAbandons),
       topHours: topHours(cartAbandons),
+      hourHistogram: hourHistogram(cartAbandons),
       topDevice: topDevice(cartAbandons),
       extraMetrics: [
         { label: "Ajouts panier", value: String(atc.length) },
@@ -335,6 +339,7 @@ export function computeAbandonments(dataset: Dataset, period: Period): Abandonme
       topProducts: topProducts(checkoutAbandons, "product_added_to_cart"),
       topSources: topSources(checkoutAbandons),
       topHours: topHours(checkoutAbandons),
+      hourHistogram: hourHistogram(checkoutAbandons),
       topDevice: topDevice(checkoutAbandons),
       extraMetrics: [
         { label: "Checkouts commencés", value: String(checkout.length) },
@@ -364,6 +369,7 @@ export function computeAbandonments(dataset: Dataset, period: Period): Abandonme
       topProducts: topProducts(paymentAbandons, "product_added_to_cart"),
       topSources: topSources(paymentAbandons),
       topHours: topHours(paymentAbandons),
+      hourHistogram: hourHistogram(paymentAbandons),
       topDevice: topDevice(paymentAbandons),
       extraMetrics: [
         { label: "Paiements atteints", value: String(payment.length) },
@@ -445,6 +451,12 @@ function topHours(group: VisitorSession[]): { hour: number; count: number }[] {
     .map(([hour, count]) => ({ hour, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 3);
+}
+
+function hourHistogram(group: VisitorSession[]): number[] {
+  const hist = Array.from({ length: 24 }, () => 0);
+  for (const s of group) hist[new Date(s.startedAt).getHours()]++;
+  return hist;
 }
 
 function topDevice(group: VisitorSession[]): string | undefined {

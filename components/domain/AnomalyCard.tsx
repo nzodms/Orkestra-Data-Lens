@@ -13,14 +13,16 @@ const SEVERITY_TONES: Record<Anomaly["severity"], BadgeTone> = {
 };
 
 export function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {
+  const needsAction = anomaly.severity === "high" || anomaly.severity === "critical";
   return (
-    <Card>
+    <Card className="card-hover">
       <div className="flex flex-wrap items-center gap-2">
         <AlertTriangle
           size={16}
           className={anomaly.severity === "low" ? "text-ink-soft" : anomaly.severity === "medium" ? "text-warn" : "text-critical"}
         />
         <h3 className="flex-1 text-[13.5px] font-semibold">{anomaly.title}</h3>
+        <Badge tone={needsAction ? "red" : "blue"}>{needsAction ? "À traiter" : "Expliquée"}</Badge>
         <Badge tone={SEVERITY_TONES[anomaly.severity]}>Sévérité {severityLabel(anomaly.severity).toLowerCase()}</Badge>
       </div>
       <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">{anomaly.description}</p>

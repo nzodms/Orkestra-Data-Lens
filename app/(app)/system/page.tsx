@@ -80,6 +80,7 @@ async function runChecks(): Promise<Check[]> {
         checks.push({ name: "Scopes", status: "skip", detail: "Pas de boutique connectée" });
         checks.push({ name: "Synchronisation", status: "skip", detail: "Pas de boutique connectée" });
         checks.push({ name: "Tracking", status: "skip", detail: "Pas de boutique connectée" });
+        checks.push({ name: "Web Pixel", status: "skip", detail: "Pas de boutique connectée" });
       } else {
         checks.push({ name: "Boutique connectée", status: "ok", detail: shop.shopify_domain });
 
@@ -117,6 +118,28 @@ async function runChecks(): Promise<Check[]> {
             ? { name: "Tracking", status: "ok", detail: `${stats.events} événements reçus (${stats.sessions} sessions), dernier : ${stats.lastEventAt ?? "—"}` }
             : { name: "Tracking", status: "warn", detail: "Aucun événement reçu sur /api/tracking/event — déployer/activer le pixel" }
         );
+
+        if (shop.pixel_status === "installed") {
+          checks.push({
+            name: "Web Pixel",
+            status: "ok",
+            detail: `Pixel installé${shop.web_pixel_id ? ` (${shop.web_pixel_id})` : ""}`,
+          });
+        } else if (shop.pixel_status === "installing") {
+          checks.push({ name: "Web Pixel", status: "warn", detail: "Installation en cours" });
+        } else if (shop.pixel_status === "error") {
+          checks.push({
+            name: "Web Pixel",
+            status: "fail",
+            detail: `Erreur d'installation : ${shop.pixel_error ?? "inconnue"} — bouton « Réinstaller le pixel » dans Paramètres`,
+          });
+        } else {
+          checks.push({
+            name: "Web Pixel",
+            status: "warn",
+            detail: "Pixel non installé — il sera créé automatiquement à la prochaine connexion OAuth, ou via Paramètres",
+          });
+        }
       }
     } catch (err) {
       checks.push({ name: "Boutique connectée", status: "fail", detail: err instanceof Error ? err.message : "Erreur inconnue" });

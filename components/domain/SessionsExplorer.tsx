@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Monitor, Search, Smartphone, Tablet } from "lucide-react";
+import { Check, ChevronRight, Minus, Monitor, Search, Smartphone, Tablet } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { Drawer } from "@/components/ui/Drawer";
 import { SessionTimeline } from "@/components/domain/SessionTimeline";
 import { classifySource, formatSourceLabel, SOURCE_LABELS, type SourceKey } from "@/lib/events";
 import type { VisitorSession } from "@/lib/types";
@@ -36,7 +37,7 @@ function stageOf(s: VisitorSession): { label: string; tone: BadgeTone } {
   if (has(s, "payment_step_reached")) return { label: "Abandon paiement", tone: "red" };
   if (has(s, "checkout_started")) return { label: "Abandon checkout", tone: "orange" };
   if (has(s, "product_added_to_cart")) return { label: "Abandon panier", tone: "orange" };
-  if (has(s, "product_viewed")) return { label: "Produit vu", tone: "blue" };
+  if (has(s, "product_viewed")) return { label: "Abandon produit", tone: "blue" };
   return { label: "Visite simple", tone: "neutral" };
 }
 
@@ -51,6 +52,46 @@ function missingUtm(s: VisitorSession): boolean {
 
 const DEVICE_ICONS = { mobile: Smartphone, desktop: Monitor, tablet: Tablet } as const;
 
+/** Chemin de la session : source → landing → produit → panier → checkout → paiement → commande. */
+function SessionPath({ session }: { session: VisitorSession }) {
+  const steps = [
+    { label: formatSourceLabel(session.source, session.medium), done: true },
+    { label: "Landing", done: true },
+    { label: "Produit", done: has(session, "product_viewed") },
+    { label: "Panier", done: has(session, "product_added_to_cart") || has(session, "cart_viewed") },
+    { label: "Checkout", done: has(session, "checkout_started") },
+    { label: "Paiement", done: has(session, "payment_step_reached") },
+    { label: "Commande", done: session.events.some((e) => e.eventName === "checkout_completed" && e.status === "confirmed") },
+  ];
+  let reachedEnd = false;
+  return (
+    <div className="flex flex-wrap items-center gap-y-1.5">
+      {steps.map((step, i) => {
+        if (!step.done && !reachedEnd) reachedEnd = true;
+        const missed = !step.done;
+        return (
+          <span key={i} className="flex items-center">
+            {i > 0 && <ChevronRight size={12} className="mx-0.5 text-ink-soft/50" />}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold",
+                step.done
+                  ? i === steps.length - 1
+                    ? "bg-positive-soft text-positive"
+                    : "bg-white/80 text-ink shadow-sm ring-1 ring-ink/5"
+                  : "bg-ink/5 text-ink-soft/60"
+              )}
+            >
+              {step.done ? <Check size={10} strokeWidth={3} /> : <Minus size={10} />}
+              {step.label}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SessionsExplorer({
   sessions,
   productOptions,
@@ -63,8 +104,8 @@ export function SessionsExplorer({
   const [device, setDevice] = useState<string>("all");
   const [product, setProduct] = useState<string>("all");
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [limit, setLimit] = useState(40);
+  const [selected, setSelected] = useState<VisitorSession | null>(null);
+  const [limit, setLimit] = useState(50);
 
   const sourceKeys = useMemo(() => {
     const keys = new Set<SourceKey>();
@@ -89,7 +130,9 @@ export function SessionsExplorer({
   }, [sessions, stage, source, device, product, query]);
 
   const selectCls =
-    "rounded-xl border border-gray-200/80 bg-white px-2.5 py-1.5 text-[12px] font-medium text-ink shadow-sm outline-none focus:border-brand/40";
+    "rounded-xl border border-ink/10 bg-white/70 px-2.5 py-1.5 text-[12px] font-medium text-ink shadow-sm outline-none transition-colors focus:border-brand/40 hover:bg-white";
+
+  const selectedStage = selected ? stageOf(selected) : null;
 
   return (
     <div className="space-y-3">
@@ -101,10 +144,10 @@ export function SessionsExplorer({
               key={f.value}
               onClick={() => setStage(f.value)}
               className={cn(
-                "rounded-full border px-3 py-1 text-[11.5px] font-medium transition-all",
+                "rounded-full border px-3 py-1 text-[11.5px] font-medium transition-all duration-200",
                 stage === f.value
-                  ? "border-ink bg-ink text-white shadow-sm"
-                  : "border-gray-200/80 bg-white text-ink-soft hover:text-ink"
+                  ? "border-ink bg-ink text-white shadow-md"
+                  : "border-ink/10 bg-white/60 text-ink-soft hover:bg-white hover:text-ink"
               )}
             >
               {f.label}
@@ -150,84 +193,156 @@ export function SessionsExplorer({
         </div>
       </div>
 
-      {/* Liste */}
+      {/* Table premium */}
       {filtered.length === 0 ? (
-        <div className="card flex flex-col items-center gap-2 p-10 text-center">
-          <Search size={20} className="text-ink-soft" />
+        <div className="card flex flex-col items-center gap-2 p-12 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-ink/5 text-ink-soft">
+            <Search size={20} />
+          </span>
           <p className="text-[13px] font-medium">Aucune session ne correspond à ces filtres</p>
           <p className="text-[12px] text-ink-soft">Élargissez la période ou réinitialisez les filtres.</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {filtered.slice(0, limit).map((session) => {
-            const stageInfo = stageOf(session);
-            const isOpen = expanded === session.id;
-            const DeviceIcon = DEVICE_ICONS[session.device];
-            const shortId = session.id.replace("ses_", "").slice(0, 4).toUpperCase();
-            return (
-              <div key={session.id} className="card overflow-hidden p-0">
-                <button
-                  onClick={() => setExpanded(isOpen ? null : session.id)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3 text-left transition-colors hover:bg-gray-50/70"
-                >
-                  <span className="num rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-bold tracking-wide">
-                    #{shortId}
-                  </span>
-                  <span className="num text-[12px] font-semibold">
-                    {formatDate(session.startedAt)} · {formatTimeShort(session.startedAt)}
-                  </span>
-                  <span className="hidden items-center gap-1 text-[11.5px] text-ink-soft sm:flex">
-                    <DeviceIcon size={13} />
-                    {session.country}
-                  </span>
-                  <span className="hidden max-w-44 truncate text-[11.5px] text-ink-soft md:block">
-                    {formatSourceLabel(session.source, session.medium)}
-                    {session.campaign ? ` / ${session.campaign}` : ""}
-                  </span>
-                  <span className="num hidden text-[11.5px] text-ink-soft lg:block">
-                    {session.durationSeconds ? formatDuration(session.durationSeconds) : "—"}
-                  </span>
-                  <span className="ml-auto flex items-center gap-2">
-                    <Badge tone={stageInfo.tone}>{stageInfo.label}</Badge>
-                    <ChevronDown
-                      size={15}
-                      className={cn("text-ink-soft transition-transform", isOpen && "rotate-180")}
-                    />
-                  </span>
-                </button>
-                {isOpen && (
-                  <div className="fade-up border-t border-gray-100 px-4 py-4 md:px-5">
-                    <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-[11.5px] text-ink-soft">
-                      <span>
-                        Session <span className="num font-semibold text-ink">{session.id}</span>
-                      </span>
-                      <span>
-                        Visiteur <span className="num font-semibold text-ink">{session.visitorId}</span>
-                      </span>
-                      <span>
-                        Landing <span className="font-medium text-ink">{session.landingPage}</span>
-                      </span>
-                      <span>
-                        Fiabilité <span className="num font-semibold text-ink">{session.reliabilityScore}/100</span>
-                      </span>
-                      <span>{session.browser}</span>
-                    </div>
-                    <SessionTimeline session={session} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-[12.5px]">
+              <thead>
+                <tr className="border-b border-ink/5 text-left text-[10.5px] uppercase tracking-[0.08em] text-ink-soft">
+                  <th className="px-4 py-3 font-semibold">Session</th>
+                  <th className="px-3 py-3 font-semibold">Heure</th>
+                  <th className="px-3 py-3 font-semibold">Source</th>
+                  <th className="px-3 py-3 font-semibold">Appareil</th>
+                  <th className="px-3 py-3 font-semibold">Durée</th>
+                  <th className="px-3 py-3 font-semibold">Parcours</th>
+                  <th className="px-4 py-3 text-right font-semibold">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0, limit).map((session) => {
+                  const stageInfo = stageOf(session);
+                  const DeviceIcon = DEVICE_ICONS[session.device];
+                  const shortId = session.id.replace("ses_", "").slice(0, 4).toUpperCase();
+                  const lastStep = ["checkout_completed", "payment_step_reached", "checkout_started", "product_added_to_cart", "product_viewed"]
+                    .findIndex((n) => has(session, n));
+                  const pathDepth = lastStep === -1 ? 0 : 5 - lastStep;
+                  return (
+                    <tr
+                      key={session.id}
+                      onClick={() => setSelected(session)}
+                      className="cursor-pointer border-b border-ink/[0.04] transition-colors last:border-0 hover:bg-white/70"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="num rounded-lg bg-ink/5 px-2 py-1 text-[11px] font-bold tracking-wide">
+                          #{shortId}
+                        </span>
+                        {(hasAnomaly(session) || missingUtm(session)) && (
+                          <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warn align-middle" title="Incohérence ou UTM manquant" />
+                        )}
+                      </td>
+                      <td className="num whitespace-nowrap px-3 py-3 font-medium">
+                        {formatDate(session.startedAt)} · {formatTimeShort(session.startedAt)}
+                      </td>
+                      <td className="max-w-44 truncate px-3 py-3 text-ink-soft">
+                        {formatSourceLabel(session.source, session.medium)}
+                        {session.campaign ? ` / ${session.campaign}` : ""}
+                      </td>
+                      <td className="px-3 py-3 text-ink-soft">
+                        <span className="inline-flex items-center gap-1.5">
+                          <DeviceIcon size={13} /> {session.country}
+                        </span>
+                      </td>
+                      <td className="num px-3 py-3 text-ink-soft">
+                        {session.durationSeconds ? formatDuration(session.durationSeconds) : "—"}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-[3px]">
+                          {[1, 2, 3, 4, 5].map((i) => (
+                            <span
+                              key={i}
+                              className={cn(
+                                "h-1.5 w-4 rounded-full",
+                                i <= pathDepth
+                                  ? session.status === "converted"
+                                    ? "bg-positive"
+                                    : "bg-brand/70"
+                                  : "bg-ink/8"
+                              )}
+                            />
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Badge tone={stageInfo.tone}>{stageInfo.label}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {filtered.length > limit && (
             <button
-              onClick={() => setLimit((l) => l + 40)}
-              className="card w-full py-2.5 text-center text-[12.5px] font-semibold text-brand transition-colors hover:bg-brand-soft/50"
+              onClick={() => setLimit((l) => l + 50)}
+              className="w-full border-t border-ink/5 py-2.5 text-center text-[12.5px] font-semibold text-brand transition-colors hover:bg-brand-soft/40"
             >
               Afficher plus ({filtered.length - limit} restantes)
             </button>
           )}
         </div>
       )}
+
+      {/* Drawer détail session */}
+      <Drawer
+        open={selected != null}
+        onClose={() => setSelected(null)}
+        title={selected ? `Session #${selected.id.replace("ses_", "").slice(0, 4).toUpperCase()}` : ""}
+        subtitle={selected ? `${formatDate(selected.startedAt)} · ${formatTimeShort(selected.startedAt)} · ${selected.browser ?? ""}` : undefined}
+        badge={selectedStage && <Badge tone={selectedStage.tone}>{selectedStage.label}</Badge>}
+      >
+        {selected && (
+          <div className="space-y-4">
+            <div className="inset-panel p-3">
+              <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
+                Chemin du visiteur
+              </div>
+              <SessionPath session={selected} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
+              <Meta label="Visiteur" value={selected.visitorId} />
+              <Meta label="Fiabilité" value={`${selected.reliabilityScore}/100`} />
+              <Meta
+                label="Source"
+                value={`${formatSourceLabel(selected.source, selected.medium)}${selected.campaign ? ` / ${selected.campaign}` : ""}`}
+              />
+              <Meta label="Landing page" value={selected.landingPage} />
+              <Meta label="Pays" value={selected.country ?? "—"} />
+              <Meta
+                label="Durée"
+                value={selected.durationSeconds ? formatDuration(selected.durationSeconds) : "—"}
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
+                Timeline horodatée
+              </div>
+              <SessionTimeline session={selected} />
+            </div>
+          </div>
+        )}
+      </Drawer>
+    </div>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className="truncate font-medium" title={value}>
+        {value}
+      </div>
     </div>
   );
 }

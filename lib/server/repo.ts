@@ -13,7 +13,9 @@ export type ShopRow = {
   timezone: string;
   is_demo: boolean;
   api_status: "connected" | "disconnected" | "error" | "demo";
-  pixel_status: "installed" | "not_installed" | "error" | "demo";
+  pixel_status: "installed" | "not_installed" | "installing" | "error" | "demo";
+  web_pixel_id: string | null;
+  pixel_error: string | null;
   installed_scopes: string | null;
   connected_at: string | null;
   uninstalled_at: string | null;
