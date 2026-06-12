@@ -64,6 +64,7 @@ type SyncState =
 export function OnboardingFlow({
   oauthConfigured,
   manualAvailable = false,
+  missingEnv = [],
   initialStep,
   connectedShopDomain,
   errorCode,
@@ -72,6 +73,7 @@ export function OnboardingFlow({
 }: {
   oauthConfigured: boolean;
   manualAvailable?: boolean;
+  missingEnv?: string[];
   initialStep: number;
   connectedShopDomain?: string;
   errorCode?: string;
@@ -247,8 +249,9 @@ export function OnboardingFlow({
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Connecter votre boutique Shopify</h1>
               <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
-                Saisissez l&apos;URL de votre boutique. Vous serez redirigé vers Shopify pour autoriser l&apos;accès —
-                nous ne voyons jamais votre mot de passe.
+                {oauthConfigured
+                  ? "Saisissez l'URL de votre boutique pour l'OAuth officiel, ou utilisez un token Admin API ci-dessous."
+                  : "Connexion par token Admin API : créez une app custom dans votre admin Shopify et collez le token — aucune app publiée nécessaire."}
               </p>
 
               {error && (
@@ -263,58 +266,70 @@ export function OnboardingFlow({
                 </div>
               )}
 
-              <div className="mt-5 flex gap-2">
-                <input
-                  value={shopUrl}
-                  onChange={(e) => setShopUrl(e.target.value)}
-                  placeholder="ma-boutique.myshopify.com"
-                  disabled={connected}
-                  className="flex-1 rounded-xl border border-gray-200/80 bg-white px-3.5 py-2.5 text-[13px] shadow-sm outline-none focus:border-brand/50 disabled:bg-gray-50"
-                />
-                <button
-                  onClick={connect}
-                  disabled={connecting || connected || !shopUrl.trim()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
-                >
-                  {connecting ? <Loader2 size={15} className="animate-spin" /> : <Store size={15} />}
-                  {connected ? "Connectée" : connecting ? "Connexion en cours…" : "Connecter ma boutique"}
-                </button>
-              </div>
+              {/* OAuth officiel — uniquement si réellement configuré */}
+              {oauthConfigured && !live && (
+                <div className="mt-5 flex gap-2">
+                  <input
+                    value={shopUrl}
+                    onChange={(e) => setShopUrl(e.target.value)}
+                    placeholder="ma-boutique.myshopify.com"
+                    disabled={connected}
+                    className="flex-1 rounded-xl border border-gray-200/80 bg-white px-3.5 py-2.5 text-[13px] shadow-sm outline-none focus:border-brand/50 disabled:bg-gray-50"
+                  />
+                  <button
+                    onClick={connect}
+                    disabled={connecting || connected || !shopUrl.trim()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
+                  >
+                    {connecting ? <Loader2 size={15} className="animate-spin" /> : <Store size={15} />}
+                    {connecting ? "Connexion en cours…" : "OAuth Shopify"}
+                  </button>
+                </div>
+              )}
 
               {live && (
                 <div className="fade-up mt-3 flex items-center gap-2 rounded-xl bg-positive-soft px-3 py-2.5 text-[12.5px] font-medium text-positive">
                   <CheckCircle2 size={15} />
-                  Boutique « {connectedShopDomain} » connectée via OAuth Shopify. Token chiffré et webhooks enregistrés.
+                  Boutique « {connectedShopDomain} » connectée. Token chiffré, données live actives.
                 </div>
+              )}
+
+              {/* Token Admin API — toujours visible (panneau de configuration si le serveur n'est pas prêt) */}
+              {!live && (
+                <div className={cn("pt-4", oauthConfigured && "mt-5 border-t border-ink/5")}>
+                  <div className="mb-2 text-[12.5px] font-semibold">
+                    {oauthConfigured ? "Ou connexion rapide par token Admin API" : "Connexion par token Admin API"}
+                  </div>
+                  <p className="mb-3 text-[11.5px] leading-relaxed text-ink-soft">
+                    Admin Shopify → Paramètres → Applications → <span className="font-medium">Développer des apps</span> →
+                    créez une app custom avec{" "}
+                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_products</code> et{" "}
+                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_orders</code>, installez-la, puis
+                    collez le token <code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>. Vous pouvez
+                    coller l&apos;URL admin de votre boutique telle quelle.
+                  </p>
+                  <ConnectShopify
+                    oauthConfigured={false}
+                    manualAvailable={manualAvailable}
+                    missingConfig={missingEnv}
+                    compact
+                  />
+                </div>
+              )}
+
+              {/* Mode démo : choix explicite, plus de « connexion simulée » */}
+              {!live && !demoConnected && (
+                <button
+                  onClick={() => setDemoConnected(true)}
+                  className="mt-4 text-[12px] font-medium text-ink-soft underline-offset-2 hover:text-ink hover:underline"
+                >
+                  Continuer en mode démo sans connecter de boutique →
+                </button>
               )}
               {demoConnected && !live && (
                 <div className="fade-up mt-3 flex items-center gap-2 rounded-xl bg-warn-soft px-3 py-2.5 text-[12.5px] font-medium text-warn">
                   <CheckCircle2 size={15} />
-                  Connexion simulée (OAuth non configuré sur ce serveur). Les données resteront en mode démo.
-                </div>
-              )}
-              {!oauthConfigured && !demoConnected && (
-                <p className="mt-3 text-[11.5px] leading-relaxed text-ink-soft">
-                  OAuth d&apos;app Shopify indisponible sur cet environnement (variables non configurées).
-                  {manualAvailable
-                    ? " Utilisez la connexion par token Admin API ci-dessous — aucune app publiée nécessaire."
-                    : " Vous pouvez continuer en mode démo."}
-                </p>
-              )}
-
-              {/* Option B — token Admin API manuel (test immédiat) */}
-              {manualAvailable && !live && (
-                <div className="mt-5 border-t border-ink/5 pt-4">
-                  <div className="mb-2 text-[12.5px] font-semibold">
-                    Ou connexion rapide par token Admin API
-                  </div>
-                  <p className="mb-3 text-[11.5px] leading-relaxed text-ink-soft">
-                    Admin Shopify → Paramètres → Applications → Développer des apps → créez une app custom avec{" "}
-                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_products</code> et{" "}
-                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_orders</code>, puis collez le token{" "}
-                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>.
-                  </p>
-                  <ConnectShopify oauthConfigured={false} manualAvailable compact />
+                  Mode démo choisi — aucune boutique connectée, toutes les données affichées sont simulées.
                 </div>
               )}
 

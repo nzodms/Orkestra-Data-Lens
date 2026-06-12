@@ -10,13 +10,20 @@ import { env, SHOPIFY_API_VERSION } from "./env";
 
 // ─── Validation du domaine boutique ──────────────────────────────────────────
 
+/**
+ * Normalise toutes les façons usuelles de désigner une boutique :
+ *  - ma-boutique.myshopify.com (avec ou sans https://, avec ou sans chemin)
+ *  - https://admin.shopify.com/store/ma-boutique[/…]  (lien admin)
+ *  - ma-boutique  (handle nu)
+ */
 export function normalizeShopDomain(raw: string): string | null {
-  const cleaned = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "");
-  return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(cleaned) ? cleaned : null;
+  let s = raw.trim().toLowerCase().replace(/^https?:\/\//, "");
+  const adminMatch = s.match(/^admin\.shopify\.com\/store\/([a-z0-9][a-z0-9-]*)/);
+  if (adminMatch) return `${adminMatch[1]}.myshopify.com`;
+  s = s.replace(/\/.*$/, "").replace(/\?.*$/, "");
+  if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(s)) return s;
+  if (/^[a-z0-9][a-z0-9-]*$/.test(s)) return `${s}.myshopify.com`;
+  return null;
 }
 
 // ─── OAuth ────────────────────────────────────────────────────────────────────

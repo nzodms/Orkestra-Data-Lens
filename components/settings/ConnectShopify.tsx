@@ -26,10 +26,12 @@ type TestResult = {
 export function ConnectShopify({
   oauthConfigured,
   manualAvailable,
+  missingConfig = [],
   compact = false,
 }: {
   oauthConfigured: boolean;
   manualAvailable: boolean;
+  missingConfig?: string[];
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -112,14 +114,52 @@ export function ConnectShopify({
         </div>
       )}
 
+      {/* Configuration serveur manquante : panneau explicite, pas de bouton mort */}
+      {!manualAvailable && (
+        <div className="rounded-xl border border-warn/25 bg-warn-soft/60 p-3.5">
+          <div className="text-[12.5px] font-semibold text-warn">
+            Configuration serveur requise pour connecter une vraie boutique
+          </div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
+            Le mode live a besoin d&apos;une base PostgreSQL et d&apos;un secret de chiffrement pour stocker le token
+            en sécurité. Variables manquantes sur ce serveur :
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {(missingConfig.length > 0 ? missingConfig : ["DATABASE_URL", "ENCRYPTION_SECRET"]).map((v) => (
+              <Badge key={v} tone="red">{v}</Badge>
+            ))}
+          </div>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11.5px] leading-relaxed text-ink-soft">
+            <li>Créez une base PostgreSQL (Supabase, Neon ou locale) et copiez son URL de connexion.</li>
+            <li>
+              Définissez <code className="rounded bg-ink/5 px-1">DATABASE_URL</code> et{" "}
+              <code className="rounded bg-ink/5 px-1">ENCRYPTION_SECRET</code> (générez-le avec{" "}
+              <code className="rounded bg-ink/5 px-1">openssl rand -hex 32</code>) dans votre fichier{" "}
+              <code className="rounded bg-ink/5 px-1">.env</code> en local, ou dans les variables
+              d&apos;environnement de votre hébergeur (Vercel → Settings → Environment Variables).
+            </li>
+            <li>Lancez <code className="rounded bg-ink/5 px-1">npm run db:migrate</code>.</li>
+            <li>Redémarrez / redéployez l&apos;application, puis revenez ici : le formulaire sera actif.</li>
+          </ol>
+        </div>
+      )}
+
       {/* Formulaire token manuel */}
-      <div className={cn("space-y-2", !manualAvailable && "pointer-events-none opacity-60")}>
+      <div className={cn("space-y-2", !manualAvailable && "pointer-events-none opacity-50")}>
         <div className="grid gap-2 sm:grid-cols-[1fr_1fr_120px]">
           <label className="block">
             <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
               Domaine Shopify
             </span>
-            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="ma-boutique.myshopify.com" className={inputCls} />
+            <input
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              placeholder="ma-boutique.myshopify.com"
+              className={inputCls}
+            />
+            <span className="mt-0.5 block text-[10px] text-ink-soft">
+              L&apos;URL admin (admin.shopify.com/store/…) ou le nom seul fonctionnent aussi.
+            </span>
           </label>
           <label className="block">
             <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
@@ -163,11 +203,6 @@ export function ConnectShopify({
             Connecter la boutique
           </button>
         </div>
-        {!manualAvailable && (
-          <p className="text-[11px] text-warn">
-            DATABASE_URL et ENCRYPTION_SECRET doivent être configurés côté serveur pour activer la connexion.
-          </p>
-        )}
       </div>
 
       {/* Résultat réel du test / de la connexion */}

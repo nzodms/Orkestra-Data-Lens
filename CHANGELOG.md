@@ -1,5 +1,22 @@
 # Changelog — Orkestra Data Lens
 
+## [0.6.1] — Correctifs connexion : URL admin acceptée, fin de la « connexion simulée »
+
+- **L'URL admin fonctionne** : `https://admin.shopify.com/store/ma-boutique`,
+  `ma-boutique.myshopify.com` ou le nom seul sont tous normalisés
+  automatiquement.
+- **Plus de bouton « connexion simulée » trompeur** dans l'onboarding : le
+  formulaire token Admin API est **toujours visible** ; si le serveur n'est
+  pas prêt, un panneau « Configuration serveur requise » liste les variables
+  exactes manquantes (DATABASE_URL, ENCRYPTION_SECRET) avec les 4 étapes
+  (base Postgres, variables d'env locales ou Vercel, `npm run db:migrate`,
+  redéploiement). Le mode démo devient un lien explicite « Continuer en mode
+  démo sans connecter de boutique ».
+- Même panneau dans Paramètres ; aide « l'URL admin fonctionne aussi » sous
+  le champ domaine.
+
+---
+
 ## [0.6.0] — Live Shopify : connexion réelle, données réelles, statut strict
 
 ### Connexion boutique (Paramètres + onboarding)

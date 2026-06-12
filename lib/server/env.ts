@@ -37,6 +37,15 @@ export function isManualConnectAvailable(): boolean {
   return Boolean(env.databaseUrl && env.encryptionSecret && env.encryptionSecret.length >= 32);
 }
 
+/** Variables manquantes pour activer la connexion live (affichées telles quelles). */
+export function manualConnectIssues(): string[] {
+  const missing: string[] = [];
+  if (!env.databaseUrl) missing.push("DATABASE_URL");
+  if (!env.encryptionSecret) missing.push("ENCRYPTION_SECRET");
+  else if (env.encryptionSecret.length < 32) missing.push("ENCRYPTION_SECRET (32 caractères minimum)");
+  return missing;
+}
+
 export type ConfigIssue = { key: string; message: string };
 
 export function configIssues(): ConfigIssue[] {

@@ -1,6 +1,11 @@
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { getAppStatus } from "@/lib/server/datasource";
-import { isDatabaseConfigured, isManualConnectAvailable, isOAuthConfigured } from "@/lib/server/env";
+import {
+  isDatabaseConfigured,
+  isManualConnectAvailable,
+  isOAuthConfigured,
+  manualConnectIssues,
+} from "@/lib/server/env";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +32,7 @@ export default async function OnboardingPage({
     <OnboardingFlow
       oauthConfigured={oauthReady}
       manualAvailable={isManualConnectAvailable()}
+      missingEnv={manualConnectIssues()}
       initialStep={initialStep}
       connectedShopDomain={connectedDomain}
       errorCode={params.error}

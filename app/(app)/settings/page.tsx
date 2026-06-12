@@ -27,7 +27,7 @@ import {
 import { SyncPanel } from "@/components/settings/SyncPanel";
 import { getActiveDataset } from "@/lib/server/datasource";
 import { runConnectionDiagnostic, type CheckStatus } from "@/lib/server/diagnostics";
-import { isManualConnectAvailable, isOAuthConfigured } from "@/lib/server/env";
+import { isManualConnectAvailable, isOAuthConfigured, manualConnectIssues } from "@/lib/server/env";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -114,7 +114,11 @@ export default async function SettingsPage() {
         ) : (
           <div className="mt-4">
             <h3 className="mb-2 text-[13px] font-semibold tracking-tight">Connecter ma boutique Shopify</h3>
-            <ConnectShopify oauthConfigured={isOAuthConfigured()} manualAvailable={isManualConnectAvailable()} />
+            <ConnectShopify
+              oauthConfigured={isOAuthConfigured()}
+              manualAvailable={isManualConnectAvailable()}
+              missingConfig={manualConnectIssues()}
+            />
             <p className="mt-3 rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
               Tant qu&apos;aucune boutique n&apos;est connectée, l&apos;application affiche un jeu de données de
               démonstration clairement identifié — jamais mélangé avec des données réelles.
