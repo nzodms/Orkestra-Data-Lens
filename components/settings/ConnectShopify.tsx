@@ -11,6 +11,7 @@ import {
   Plug,
   Rocket,
   Store,
+  TriangleAlert,
   XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
@@ -27,43 +28,47 @@ type TestResult = {
   error?: string;
 };
 
-type ConnectMode = "token" | "dev_dashboard";
+type ConnectMode = "token" | "dev_dashboard" | "oauth_env";
 
 /**
- * Connexion boutique Shopify, deux modes au choix :
- *  - « token » : token Admin API legacy (shpat_…), test immédiat ;
- *  - « dev_dashboard » : app du nouveau Shopify Dev Dashboard via Client ID +
- *    Client Secret, flux OAuth complet (HMAC, échange de code, token chiffré).
+ * Connexion boutique Shopify — TROIS modes explicites, toujours visibles :
+ *  1. « token »         — token Admin API legacy (shpat_…), test immédiat ;
+ *  2. « dev_dashboard » — app du nouveau Dev Dashboard via Client ID + Client
+ *     Secret saisis dans l'UI (base + chiffrement + /api/shopify/oauth-config),
+ *     SANS dépendre de SHOPIFY_API_KEY/SECRET ;
+ *  3. « oauth_env »     — OAuth officiel d'une app publique configurée par
+ *     variables d'environnement (peut rester désactivé si elles manquent).
  *
- * La validation `shpat_` ne concerne QUE le mode token. Le secret/token
- * n'est jamais réaffiché après enregistrement.
+ * La validation `shpat_` ne concerne QUE le mode 1. Le formulaire Dev Dashboard
+ * reste TOUJOURS affiché : si la base/le chiffrement/la table manquent, on
+ * affiche une erreur claire sans masquer le formulaire.
  */
 export function ConnectShopify({
   oauthConfigured,
   manualAvailable,
   missingConfig = [],
   compact = false,
-  defaultAppUrl,
+  defaultAppUrl = "",
   defaultScopes,
 }: {
   oauthConfigured: boolean;
   manualAvailable: boolean;
   missingConfig?: string[];
   compact?: boolean;
-  defaultAppUrl: string;
+  defaultAppUrl?: string;
   defaultScopes: string;
 }) {
   const router = useRouter();
-  const [mode, setMode] = useState<ConnectMode>("token");
+  const [mode, setMode] = useState<ConnectMode>("dev_dashboard");
 
-  // ── Mode token Admin API ───────────────────────────────────────────────────
+  // ── Mode 1 — token Admin API ────────────────────────────────────────────────
   const [domain, setDomain] = useState("");
   const [token, setToken] = useState("");
   const [apiVersion, setApiVersion] = useState("2025-01");
   const [pending, setPending] = useState<"test" | "connect" | null>(null);
   const [result, setResult] = useState<TestResult | null>(null);
 
-  // ── Mode Dev Dashboard (OAuth) ──────────────────────────────────────────────
+  // ── Mode 2 — Dev Dashboard (OAuth via Client ID/Secret) ─────────────────────
   const [ddDomain, setDdDomain] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -72,16 +77,19 @@ export function ConnectShopify({
   const [hasSavedSecret, setHasSavedSecret] = useState(false);
   const [ddPending, setDdPending] = useState(false);
   const [ddError, setDdError] = useState<string | null>(null);
+  const [oauthTableMissing, setOauthTableMissing] = useState(false);
 
-  const redirectUrl = `${appUrl.replace(/\/$/, "")}/api/shopify/callback`;
+  // ── Mode 3 — OAuth officiel (variables d'environnement) ─────────────────────
+  const [envDomain, setEnvDomain] = useState("");
 
-  // URL d'app : origine réelle de la page (ou NEXT_PUBLIC_APP_URL) plutôt
-  // qu'une URL codée en dur, si le serveur n'en a pas fourni.
+  const redirectUrl = `${(appUrl || "").replace(/\/$/, "")}/api/shopify/callback`;
+
+  // URL d'app : origine réelle de la page (ou NEXT_PUBLIC_APP_URL) — jamais codée en dur.
   useEffect(() => {
     setAppUrl((prev) => prev || getClientAppUrl());
   }, []);
 
-  // Pré-remplissage si une config Dev Dashboard a déjà été enregistrée
+  // Pré-remplissage si une config Dev Dashboard a déjà été enregistrée.
   useEffect(() => {
     if (!manualAvailable) return;
     let cancelled = false;
@@ -98,7 +106,22 @@ export function ConnectShopify({
     return () => {
       cancelled = true;
     };
-  }, [manualAvailable, defaultAppUrl, defaultScopes]);
+  }, [manualAvailable, defaultScopes]);
+
+  // Détection proactive de la table OAuth manquante (n'empêche jamais l'affichage du formulaire).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/system/diagnostic", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { oauthTablePresent?: boolean; dbConnected?: boolean }) => {
+        if (cancelled) return;
+        if (d.dbConnected && d.oauthTablePresent === false) setOauthTableMissing(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async (dryRun: boolean) => {
     setPending(dryRun ? "test" : "connect");
@@ -137,11 +160,10 @@ export function ConnectShopify({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clientId: clientId.trim(),
-          // Champ vide + secret déjà enregistré → on conserve le secret existant
-          // (le serveur omet la mise à jour du secret).
+          // Champ vide + secret déjà enregistré → on conserve le secret existant.
           clientSecret: clientSecret.trim() || undefined,
           scopes: scopes.trim() || defaultScopes,
-          appUrl: appUrl.trim(),
+          appUrl: (appUrl || getClientAppUrl()).trim(),
           shop: ddDomain.trim(),
         }),
       });
@@ -151,8 +173,7 @@ export function ConnectShopify({
         return;
       }
       if (data.authorizeUrl) {
-        // Redirection vers Shopify pour l'autorisation OAuth
-        window.location.href = data.authorizeUrl;
+        window.location.href = data.authorizeUrl; // redirection vers Shopify (OAuth)
       } else {
         toast("Configuration enregistrée.", "success");
         router.refresh();
@@ -167,94 +188,56 @@ export function ConnectShopify({
   const inputCls =
     "w-full rounded-xl border border-ink/10 bg-white/80 px-3 py-2 text-[12.5px] shadow-sm outline-none focus:border-brand/50";
 
+  const TABS: { id: ConnectMode; label: string; icon: typeof KeyRound }[] = [
+    { id: "token", label: "Token Admin API", icon: KeyRound },
+    { id: "dev_dashboard", label: "App Dev Dashboard", icon: Rocket },
+    { id: "oauth_env", label: "OAuth officiel (env)", icon: Plug },
+  ];
+
   return (
     <div className="space-y-3">
-      {/* Sélecteur de mode */}
-      <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-ink/[0.04] p-1">
-        <button
-          onClick={() => setMode("token")}
-          className={cn(
-            "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors",
-            mode === "token" ? "bg-white text-ink shadow-sm" : "text-ink-soft hover:text-ink"
-          )}
-        >
-          <KeyRound size={13} /> J&apos;ai un token Admin API
-        </button>
-        <button
-          onClick={() => setMode("dev_dashboard")}
-          className={cn(
-            "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors",
-            mode === "dev_dashboard" ? "bg-white text-ink shadow-sm" : "text-ink-soft hover:text-ink"
-          )}
-        >
-          <Rocket size={13} /> J&apos;ai une app Dev Dashboard
-        </button>
+      {/* Sélecteur de mode — 3 modes toujours visibles */}
+      <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-ink/[0.04] p-1">
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setMode(t.id)}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11.5px] font-semibold transition-colors",
+                mode === t.id ? "bg-white text-ink shadow-sm" : "text-ink-soft hover:text-ink"
+              )}
+            >
+              <Icon size={13} /> <span className="truncate">{t.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Configuration serveur manquante : panneau explicite, pas de bouton mort */}
-      {!manualAvailable && (
-        <div className="rounded-xl border border-warn/25 bg-warn-soft/60 p-3.5">
-          <div className="text-[12.5px] font-semibold text-warn">
-            Configuration serveur requise pour connecter une vraie boutique
-          </div>
-          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
-            Le mode live a besoin d&apos;une base PostgreSQL et d&apos;un secret de chiffrement pour stocker le
-            token/secret en sécurité. Variables manquantes sur ce serveur :
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {(missingConfig.length > 0 ? missingConfig : ["DATABASE_URL", "ENCRYPTION_SECRET"]).map((v) => (
-              <Badge key={v} tone="red">
-                {v}
-              </Badge>
-            ))}
-          </div>
-          <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11.5px] leading-relaxed text-ink-soft">
-            <li>Créez une base PostgreSQL (Supabase, Neon ou locale) et copiez son URL de connexion.</li>
-            <li>
-              Définissez <code className="rounded bg-ink/5 px-1">DATABASE_URL</code> et{" "}
-              <code className="rounded bg-ink/5 px-1">ENCRYPTION_SECRET</code> (générez-le avec{" "}
-              <code className="rounded bg-ink/5 px-1">openssl rand -hex 32</code>) dans vos variables
-              d&apos;environnement (Vercel → Settings → Environment Variables).
-            </li>
-            <li>
-              Lancez <code className="rounded bg-ink/5 px-1">npm run db:migrate</code>, puis redéployez.
-            </li>
-          </ol>
-        </div>
-      )}
-
-      {/* ── MODE TOKEN ADMIN API ─────────────────────────────────────────────── */}
+      {/* ── MODE 1 — TOKEN ADMIN API ─────────────────────────────────────────── */}
       {mode === "token" && (
         <>
           {!compact && (
             <p className="rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
               Admin Shopify → Paramètres → Applications → <span className="font-medium">Développer des apps</span> →
-              créez une app custom avec <code className="rounded bg-ink/5 px-1">read_products</code> et{" "}
+              app custom avec <code className="rounded bg-ink/5 px-1">read_products</code> et{" "}
               <code className="rounded bg-ink/5 px-1">read_orders</code>, installez-la, puis collez le token{" "}
-              <code className="rounded bg-ink/5 px-1">shpat_…</code>. Aucune app publiée nécessaire.
+              <code className="rounded bg-ink/5 px-1">shpat_…</code>.
             </p>
           )}
-
-          <div className={cn("space-y-2", !manualAvailable && "pointer-events-none opacity-50")}>
+          {!manualAvailable && <ServerConfigBanner missingConfig={missingConfig} />}
+          <div className="space-y-2">
             <div className="grid gap-2 sm:grid-cols-[1fr_1fr_120px]">
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Domaine Shopify
-                </span>
+              <Field label="Domaine Shopify">
                 <input
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
                   placeholder="ma-boutique.myshopify.com"
                   className={inputCls}
                 />
-                <span className="mt-0.5 block text-[10px] text-ink-soft">
-                  L&apos;URL admin (admin.shopify.com/store/…) ou le nom seul fonctionnent aussi.
-                </span>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Admin API access token
-                </span>
+              </Field>
+              <Field label="Admin API access token">
                 <input
                   type="password"
                   value={token}
@@ -263,17 +246,14 @@ export function ConnectShopify({
                   autoComplete="off"
                   className={inputCls}
                 />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Version API
-                </span>
+              </Field>
+              <Field label="Version API">
                 <select value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} className={inputCls}>
                   <option value="2025-01">2025-01</option>
                   <option value="2024-10">2024-10</option>
                   <option value="2024-07">2024-07</option>
                 </select>
-              </label>
+              </Field>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -295,7 +275,6 @@ export function ConnectShopify({
             </div>
           </div>
 
-          {/* Résultat réel du test / de la connexion */}
           {result && (
             <div
               className={cn(
@@ -324,54 +303,57 @@ export function ConnectShopify({
                   ))}
                 </div>
               )}
-              {result.ok && result.dryRun && (
-                <p className="mt-1 text-[11px] text-ink-soft">
-                  Cliquez « Connecter la boutique » pour enregistrer (token chiffré, jamais réaffiché).
-                </p>
-              )}
             </div>
           )}
         </>
       )}
 
-      {/* ── MODE DEV DASHBOARD (OAuth) ───────────────────────────────────────── */}
+      {/* ── MODE 2 — APP DEV DASHBOARD ───────────────────────────────────────── */}
       {mode === "dev_dashboard" && (
         <>
-          <p className="rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
-            Dans le nouveau <span className="font-medium">Shopify Dev Dashboard</span> → votre app → onglet{" "}
-            <span className="font-medium">API access / Configuration</span>, copiez le{" "}
-            <span className="font-medium">Client ID</span> et le <span className="font-medium">Client Secret</span>,
-            collez les valeurs ci-dessous dans Shopify (URL d&apos;app + URL de redirection + scopes), puis lancez
-            l&apos;autorisation. Le secret est chiffré en base et n&apos;est jamais réaffiché.
-          </p>
+          {!compact && (
+            <p className="rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
+              Nouveau <span className="font-medium">Shopify Dev Dashboard</span> → votre app →{" "}
+              <span className="font-medium">Configuration / API access</span> : copiez le{" "}
+              <span className="font-medium">Client ID</span> et le <span className="font-medium">Client Secret</span>,
+              collez ci-dessous, puis « Enregistrer & lancer l&apos;autorisation Shopify ». Aucune variable
+              SHOPIFY_API_KEY/SECRET nécessaire : le secret est chiffré en base.
+            </p>
+          )}
+
+          {/* Banniéres d'erreur — n'effacent jamais le formulaire */}
+          {!manualAvailable && <ServerConfigBanner missingConfig={missingConfig} />}
+          {oauthTableMissing && (
+            <div className="flex items-start gap-2 rounded-xl border border-warn/25 bg-warn-soft/60 px-3 py-2.5 text-[12px] font-medium leading-relaxed text-warn">
+              <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Migration manquante : table shopify_oauth_config absente. Appliquez les migrations via le bloc
+                « Diagnostic serveur » ci-dessus, puis réessayez.
+              </span>
+            </div>
+          )}
 
           {/* Valeurs à recopier dans Shopify Dev Dashboard */}
           <div className="inset-panel space-y-2 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
               À copier dans Shopify Dev Dashboard
             </div>
-            <CopyField label="URL de l'application" value={appUrl.replace(/\/$/, "")} />
+            <CopyField label="URL de l'application" value={(appUrl || "").replace(/\/$/, "")} />
             <CopyField label="URL de redirection (OAuth callback)" value={redirectUrl} />
             <CopyField label="Scopes requis" value={scopes.trim() || defaultScopes} />
           </div>
 
-          <div className={cn("space-y-2", !manualAvailable && "pointer-events-none opacity-50")}>
-            <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                Domaine Shopify
-              </span>
+          <div className="space-y-2">
+            <Field label="Domaine Shopify">
               <input
                 value={ddDomain}
                 onChange={(e) => setDdDomain(e.target.value)}
                 placeholder="ma-boutique.myshopify.com"
                 className={inputCls}
               />
-            </label>
+            </Field>
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Client ID
-                </span>
+              <Field label="Client ID">
                 <input
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
@@ -379,11 +361,10 @@ export function ConnectShopify({
                   autoComplete="off"
                   className={inputCls}
                 />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Client Secret {hasSavedSecret && <span className="font-normal normal-case text-ink-soft">(déjà enregistré)</span>}
-                </span>
+              </Field>
+              <Field
+                label={`Client Secret${hasSavedSecret ? " (déjà enregistré)" : ""}`}
+              >
                 <input
                   type="password"
                   value={clientSecret}
@@ -392,34 +373,28 @@ export function ConnectShopify({
                   autoComplete="off"
                   className={inputCls}
                 />
-              </label>
+              </Field>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  Scopes
-                </span>
+              <Field label="Scopes">
                 <input
                   value={scopes}
                   onChange={(e) => setScopes(e.target.value)}
                   placeholder={defaultScopes}
                   className={inputCls}
                 />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
-                  URL de l&apos;application
-                </span>
+              </Field>
+              <Field label="URL de l'application">
                 <input value={appUrl} onChange={(e) => setAppUrl(e.target.value)} className={inputCls} />
-              </label>
+              </Field>
             </div>
             <button
               onClick={connectDevDashboard}
-              disabled={ddPending || !manualAvailable}
+              disabled={ddPending}
               className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-strong disabled:opacity-50"
             >
               {ddPending ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
-              Enregistrer & lancer l&apos;autorisation Shopify
+              Enregistrer &amp; lancer l&apos;autorisation Shopify
             </button>
           </div>
 
@@ -431,6 +406,77 @@ export function ConnectShopify({
           )}
         </>
       )}
+
+      {/* ── MODE 3 — OAUTH OFFICIEL (VARIABLES D'ENVIRONNEMENT) ──────────────── */}
+      {mode === "oauth_env" && (
+        <>
+          <p className="rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
+            App publique Shopify configurée par variables d&apos;environnement
+            (<code className="rounded bg-ink/5 px-1">SHOPIFY_API_KEY</code>,{" "}
+            <code className="rounded bg-ink/5 px-1">SHOPIFY_API_SECRET</code>,{" "}
+            <code className="rounded bg-ink/5 px-1">SHOPIFY_APP_URL</code>). Mode distinct du Dev Dashboard.
+          </p>
+          {!oauthConfigured && (
+            <div className="flex items-start gap-2 rounded-xl border border-warn/25 bg-warn-soft/60 px-3 py-2.5 text-[12px] font-medium leading-relaxed text-warn">
+              <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Désactivé : variables SHOPIFY_API_KEY / SHOPIFY_API_SECRET / SHOPIFY_APP_URL non configurées. Utilisez
+                plutôt « App Dev Dashboard » (Client ID + Client Secret dans l&apos;interface).
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={envDomain}
+              onChange={(e) => setEnvDomain(e.target.value)}
+              placeholder="ma-boutique.myshopify.com"
+              disabled={!oauthConfigured}
+              className={cn(inputCls, "flex-1", !oauthConfigured && "opacity-60")}
+            />
+            <button
+              onClick={() =>
+                envDomain.trim() &&
+                (window.location.href = `/api/shopify/auth?shop=${encodeURIComponent(envDomain.trim())}`)
+              }
+              disabled={!oauthConfigured || !envDomain.trim()}
+              className="shrink-0 rounded-xl bg-brand px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-strong disabled:opacity-50"
+            >
+              Lancer l&apos;OAuth
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-soft">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ServerConfigBanner({ missingConfig }: { missingConfig: string[] }) {
+  return (
+    <div className="rounded-xl border border-critical/25 bg-critical-soft/50 p-3">
+      <div className="text-[12px] font-semibold text-critical">
+        Base / chiffrement requis pour ce mode (le formulaire reste utilisable, l&apos;enregistrement échouera tant que
+        ce n&apos;est pas configuré).
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {(missingConfig.length > 0 ? missingConfig : ["DATABASE_URL", "ENCRYPTION_SECRET"]).map((v) => (
+          <Badge key={v} tone="red">
+            {v}
+          </Badge>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">
+        Ajoutez ces variables dans Vercel (Settings → Environment Variables), puis appliquez les migrations via le bloc
+        « Diagnostic serveur ».
+      </p>
     </div>
   );
 }

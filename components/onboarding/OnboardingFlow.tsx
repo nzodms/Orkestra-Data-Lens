@@ -13,7 +13,6 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  Store,
   XCircle,
 } from "lucide-react";
 import { ConnectShopify } from "@/components/settings/ConnectShopify";
@@ -89,8 +88,6 @@ export function OnboardingFlow({
   const router = useRouter();
   const live = Boolean(connectedShopDomain);
   const [step, setStep] = useState(initialStep);
-  const [shopUrl, setShopUrl] = useState(connectedShopDomain ?? "");
-  const [connecting, setConnecting] = useState(false);
   const [demoConnected, setDemoConnected] = useState(false);
   const [pixelAcknowledged, setPixelAcknowledged] = useState(pixelInstalled);
   const [sync, setSync] = useState<SyncState>({ phase: "idle" });
@@ -99,23 +96,6 @@ export function OnboardingFlow({
 
   const connected = live || demoConnected;
   const error = errorCode ? (ERROR_MESSAGES[errorCode] ?? "Erreur inconnue lors de la connexion.") : null;
-
-  const connect = () => {
-    const trimmed = shopUrl.trim();
-    if (!trimmed) return;
-    setConnecting(true);
-    if (oauthConfigured) {
-      // Redirection OAuth réelle : /api/shopify/auth génère le state signé
-      // puis redirige vers la page d'autorisation Shopify.
-      window.location.href = `/api/shopify/auth?shop=${encodeURIComponent(trimmed)}`;
-      return;
-    }
-    // OAuth non configuré : simulation clairement étiquetée « mode démo »
-    setTimeout(() => {
-      setConnecting(false);
-      setDemoConnected(true);
-    }, 1400);
-  };
 
   // Synchronisation : réelle si la boutique est connectée, simulée sinon
   useEffect(() => {
@@ -255,9 +235,9 @@ export function OnboardingFlow({
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Connecter votre boutique Shopify</h1>
               <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
-                {oauthConfigured
-                  ? "Saisissez l'URL de votre boutique pour l'OAuth officiel, ou utilisez un token Admin API ci-dessous."
-                  : "Connexion par token Admin API : créez une app custom dans votre admin Shopify et collez le token — aucune app publiée nécessaire."}
+                Trois modes au choix : <span className="font-medium">token Admin API</span> (shpat_…),{" "}
+                <span className="font-medium">app du nouveau Dev Dashboard</span> (Client ID + Client Secret), ou{" "}
+                <span className="font-medium">OAuth officiel</span> par variables d&apos;environnement.
               </p>
 
               {error && (
@@ -272,27 +252,6 @@ export function OnboardingFlow({
                 </div>
               )}
 
-              {/* OAuth officiel — uniquement si réellement configuré */}
-              {oauthConfigured && !live && (
-                <div className="mt-5 flex gap-2">
-                  <input
-                    value={shopUrl}
-                    onChange={(e) => setShopUrl(e.target.value)}
-                    placeholder="ma-boutique.myshopify.com"
-                    disabled={connected}
-                    className="flex-1 rounded-xl border border-gray-200/80 bg-white px-3.5 py-2.5 text-[13px] shadow-sm outline-none focus:border-brand/50 disabled:bg-gray-50"
-                  />
-                  <button
-                    onClick={connect}
-                    disabled={connecting || connected || !shopUrl.trim()}
-                    className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-50"
-                  >
-                    {connecting ? <Loader2 size={15} className="animate-spin" /> : <Store size={15} />}
-                    {connecting ? "Connexion en cours…" : "OAuth Shopify"}
-                  </button>
-                </div>
-              )}
-
               {live && (
                 <div className="fade-up mt-3 flex items-center gap-2 rounded-xl bg-positive-soft px-3 py-2.5 text-[12.5px] font-medium text-positive">
                   <CheckCircle2 size={15} />
@@ -300,20 +259,11 @@ export function OnboardingFlow({
                 </div>
               )}
 
-              {/* Connexion boutique — deux modes : token Admin API ou app Dev Dashboard */}
+              {/* Connexion boutique — 3 modes (token, Dev Dashboard, OAuth env) */}
               {!live && (
-                <div className={cn("pt-4", oauthConfigured && "mt-5 border-t border-ink/5")}>
-                  <div className="mb-2 text-[12.5px] font-semibold">
-                    Connecter votre boutique
-                  </div>
-                  <p className="mb-3 text-[11.5px] leading-relaxed text-ink-soft">
-                    Choisissez votre méthode : un <span className="font-medium">token Admin API</span>{" "}
-                    (<code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>) si votre app custom en
-                    affiche un, ou une <span className="font-medium">app du nouveau Dev Dashboard</span> via Client ID +
-                    Client Secret (flux OAuth).
-                  </p>
+                <div className="mt-5">
                   <ConnectShopify
-                    oauthConfigured={false}
+                    oauthConfigured={oauthConfigured}
                     manualAvailable={manualAvailable}
                     missingConfig={missingEnv}
                     defaultAppUrl={defaultAppUrl}
