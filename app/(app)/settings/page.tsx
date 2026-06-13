@@ -8,6 +8,7 @@ import {
   Globe,
   Plug,
   Radio,
+  Rocket,
   Stethoscope,
   Store,
   TriangleAlert,
@@ -18,6 +19,10 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { PixelButton } from "@/components/domain/PixelButton";
 import { ConnectShopify } from "@/components/settings/ConnectShopify";
+import { ServerDiagnostic } from "@/components/settings/ServerDiagnostic";
+import { ShopifyAppValues } from "@/components/settings/ShopifyAppValues";
+import { getAllMigrationsSql } from "@/lib/server/migrate";
+import { runSystemDiagnostic } from "@/lib/server/systemDiagnostic";
 import {
   DataModeSwitch,
   DisconnectButton,
@@ -27,7 +32,13 @@ import {
 import { SyncPanel } from "@/components/settings/SyncPanel";
 import { getActiveDataset } from "@/lib/server/datasource";
 import { runConnectionDiagnostic, type CheckStatus } from "@/lib/server/diagnostics";
-import { isManualConnectAvailable, isOAuthConfigured, manualConnectIssues } from "@/lib/server/env";
+import {
+  DEFAULT_APP_URL,
+  DEV_DASHBOARD_SCOPES,
+  isManualConnectAvailable,
+  isOAuthConfigured,
+  manualConnectIssues,
+} from "@/lib/server/env";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +64,7 @@ export default async function SettingsPage() {
   const hasConnection = Boolean(status.shopDomain); // connectée, même si bascule démo forcée
   const lastSync = status.lastSync;
   const diagnostic = runConnectionDiagnostic(status);
+  const [serverDiag, migrationsSql] = [await runSystemDiagnostic(), getAllMigrationsSql()];
 
   // Badge d'état de connexion le plus précis possible — jamais de faux statut
   const connectionBadge = !hasConnection ? (
@@ -118,6 +130,8 @@ export default async function SettingsPage() {
               oauthConfigured={isOAuthConfigured()}
               manualAvailable={isManualConnectAvailable()}
               missingConfig={manualConnectIssues()}
+              defaultAppUrl={DEFAULT_APP_URL}
+              defaultScopes={DEV_DASHBOARD_SCOPES}
             />
             <p className="mt-3 rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
               Tant qu&apos;aucune boutique n&apos;est connectée, l&apos;application affiche un jeu de données de
@@ -125,6 +139,26 @@ export default async function SettingsPage() {
             </p>
           </div>
         )}
+      </Card>
+
+      {/* Diagnostic serveur : env, DB, migrations, table OAuth, environnement, URL */}
+      <Card>
+        <CardTitle sub="État réel du serveur : variables, base PostgreSQL, migrations et table OAuth. Appliquez les migrations sans terminal local.">
+          <span className="inline-flex items-center gap-1.5">
+            <Database size={15} className="text-ink-soft" /> Diagnostic serveur
+          </span>
+        </CardTitle>
+        <ServerDiagnostic initial={serverDiag} migrationsSql={migrationsSql} />
+      </Card>
+
+      {/* Valeurs à copier dans le Shopify Dev Dashboard */}
+      <Card>
+        <CardTitle sub="Pour le mode « App Dev Dashboard » : recopiez ces valeurs dans votre app Shopify (Configuration → URLs & scopes).">
+          <span className="inline-flex items-center gap-1.5">
+            <Rocket size={15} className="text-ink-soft" /> App Shopify Dev Dashboard
+          </span>
+        </CardTitle>
+        <ShopifyAppValues appUrl={DEFAULT_APP_URL} scopes={DEV_DASHBOARD_SCOPES} />
       </Card>
 
       {/* Diagnostic Shopify */}

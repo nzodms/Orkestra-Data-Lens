@@ -2,7 +2,13 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { isDatabaseConfigured } from "./env";
 import { verifyWebhookHmac } from "./shopify";
-import { getShopByDomain, markWebhookDelivery, recordWebhookDelivery, type ShopRow } from "./repo";
+import {
+  getShopByDomain,
+  markWebhookDelivery,
+  recordWebhookDelivery,
+  resolveOAuthCredentials,
+  type ShopRow,
+} from "./repo";
 
 /**
  * Pipeline commun à tous les webhooks Shopify :
@@ -24,7 +30,10 @@ export async function handleShopifyWebhook(
   const shopDomain = req.headers.get("x-shopify-shop-domain");
   const deliveryId = req.headers.get("x-shopify-webhook-id") ?? `no-id-${Date.now()}`;
 
-  if (!verifyWebhookHmac(rawBody, hmac)) {
+  // Le secret de signature des webhooks est le Client Secret de l'app —
+  // config Dev Dashboard (base) en priorité, sinon variable d'environnement.
+  const creds = await resolveOAuthCredentials().catch(() => null);
+  if (!verifyWebhookHmac(rawBody, hmac, creds?.clientSecret ?? undefined)) {
     console.warn(`[webhook] HMAC invalide (topic=${topic}, shop=${shopDomain ?? "?"})`);
     return NextResponse.json({ error: "HMAC invalide" }, { status: 401 });
   }

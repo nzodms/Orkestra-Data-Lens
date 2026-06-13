@@ -17,6 +17,7 @@ import { env, isDatabaseConfigured, isOAuthConfigured } from "./env";
 import {
   getConnectedShop,
   getLastSyncRun,
+  getOAuthAppConfigPublic,
   getShopStats,
   replaceAnomalies,
   type ShopRow,
@@ -90,11 +91,18 @@ export const getAppStatus = cache(async (): Promise<AppStatus> => {
     queryOne<{ id: string }>("select id from shopify_tokens where shop_id = $1", [shop.id]),
   ]);
   // Pour une connexion par token manuel, les scopes de référence sont
-  // ceux du token ; pour l'OAuth, ceux demandés par l'app.
-  const requested =
-    shop.connection_method === "manual_token"
-      ? ["read_products", "read_orders"]
-      : env.shopifyScopes.split(",").map((s) => s.trim()).filter(Boolean);
+  // ceux du token ; pour l'OAuth, ceux demandés par l'app (config Dev
+  // Dashboard en base si présente, sinon variable d'environnement).
+  let requested: string[];
+  if (shop.connection_method === "manual_token") {
+    requested = ["read_products", "read_orders"];
+  } else {
+    const oauthCfg = await getOAuthAppConfigPublic().catch(() => null);
+    requested = (oauthCfg?.scopes ?? env.shopifyScopes)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
   const installed = (shop.installed_scopes ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
   // Bascule explicite « Revenir au mode démo » : la boutique reste

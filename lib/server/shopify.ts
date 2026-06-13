@@ -28,11 +28,27 @@ export function normalizeShopDomain(raw: string): string | null {
 
 // ─── OAuth ────────────────────────────────────────────────────────────────────
 
-export function buildAuthorizeUrl(shopDomain: string, state: string): string {
+/**
+ * Identifiants OAuth d'une app Shopify, qu'ils proviennent du Dev Dashboard
+ * (saisis dans l'interface, stockés chiffrés en base) ou des variables
+ * d'environnement (app Partner historique).
+ */
+export type OAuthCredentials = {
+  clientId: string;
+  clientSecret: string;
+  scopes: string;
+  appUrl: string;
+};
+
+export function buildAuthorizeUrl(
+  shopDomain: string,
+  state: string,
+  creds: OAuthCredentials
+): string {
   const params = new URLSearchParams({
-    client_id: env.shopifyApiKey,
-    scope: env.shopifyScopes,
-    redirect_uri: `${env.shopifyAppUrl}/api/shopify/callback`,
+    client_id: creds.clientId,
+    scope: creds.scopes,
+    redirect_uri: `${creds.appUrl.replace(/\/$/, "")}/api/shopify/callback`,
     state,
   });
   return `https://${shopDomain}/admin/oauth/authorize?${params}`;
@@ -42,15 +58,15 @@ export function buildAuthorizeUrl(shopDomain: string, state: string): string {
  * Vérifie le HMAC d'un callback OAuth : tous les paramètres sauf `hmac`,
  * triés, encodés en query string, signés HMAC-SHA256 avec le secret d'app.
  */
-export function verifyOAuthHmac(searchParams: URLSearchParams): boolean {
+export function verifyOAuthHmac(searchParams: URLSearchParams, clientSecret: string): boolean {
   const hmac = searchParams.get("hmac");
-  if (!hmac || !env.shopifyApiSecret) return false;
+  if (!hmac || !clientSecret) return false;
   const entries = [...searchParams.entries()]
     .filter(([k]) => k !== "hmac" && k !== "signature")
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
     .join("&");
-  const digest = createHmac("sha256", env.shopifyApiSecret).update(entries).digest("hex");
+  const digest = createHmac("sha256", clientSecret).update(entries).digest("hex");
   const a = Buffer.from(digest);
   const b = Buffer.from(hmac);
   return a.length === b.length && timingSafeEqual(a, b);
@@ -58,14 +74,15 @@ export function verifyOAuthHmac(searchParams: URLSearchParams): boolean {
 
 export async function exchangeCodeForToken(
   shopDomain: string,
-  code: string
+  code: string,
+  creds: OAuthCredentials
 ): Promise<{ accessToken: string; scopes: string }> {
   const res = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_id: env.shopifyApiKey,
-      client_secret: env.shopifyApiSecret,
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
       code,
     }),
   });
@@ -79,9 +96,13 @@ export async function exchangeCodeForToken(
 
 // ─── Webhooks : vérification HMAC sur le raw body ────────────────────────────
 
-export function verifyWebhookHmac(rawBody: string, hmacHeader: string | null): boolean {
-  if (!hmacHeader || !env.shopifyApiSecret) return false;
-  const digest = createHmac("sha256", env.shopifyApiSecret).update(rawBody, "utf8").digest("base64");
+export function verifyWebhookHmac(
+  rawBody: string,
+  hmacHeader: string | null,
+  clientSecret: string = env.shopifyApiSecret
+): boolean {
+  if (!hmacHeader || !clientSecret) return false;
+  const digest = createHmac("sha256", clientSecret).update(rawBody, "utf8").digest("base64");
   const a = Buffer.from(digest);
   const b = Buffer.from(hmacHeader);
   return a.length === b.length && timingSafeEqual(a, b);
@@ -184,10 +205,12 @@ const WEBHOOK_TOPICS: { topic: string; path: string }[] = [
 
 export async function registerWebhooks(
   shopDomain: string,
-  accessToken: string
+  accessToken: string,
+  appUrl: string = env.shopifyAppUrl
 ): Promise<{ registered: string[]; errors: string[] }> {
   const registered: string[] = [];
   const errors: string[] = [];
+  const base = appUrl.replace(/\/$/, "");
 
   for (const { topic, path } of WEBHOOK_TOPICS) {
     try {
@@ -201,7 +224,7 @@ export async function registerWebhooks(
             userErrors { message }
           }
         }`,
-        { topic, webhookSubscription: { callbackUrl: `${env.shopifyAppUrl}${path}`, format: "JSON" } }
+        { topic, webhookSubscription: { callbackUrl: `${base}${path}`, format: "JSON" } }
       );
       const userErrors = data.webhookSubscriptionCreate.userErrors;
       // « address has already been taken » = déjà enregistré : non bloquant
@@ -225,7 +248,7 @@ export function shopifyIdToNumeric(gid: string | number | null | undefined): str
   return match ? match[1] : s;
 }
 
-// ─── Connexion par token Admin API manuel (Option B) ─────────────────────────
+// ─── Connexion par token Admin API manuel (mode « Token Admin API ») ─────────
 
 export type ConnectionTest = {
   ok: boolean;

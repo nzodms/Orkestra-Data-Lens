@@ -1,7 +1,8 @@
 import "server-only";
 import { query, queryOne } from "./db";
 import { decryptSecret, encryptSecret, maskEmail } from "./crypto";
-import { shopifyIdToNumeric } from "./shopify";
+import { shopifyIdToNumeric, type OAuthCredentials } from "./shopify";
+import { env } from "./env";
 
 /** Lignes typées des tables principales. */
 
@@ -44,6 +45,88 @@ export type SyncRunRow = {
   error_message: string | null;
 };
 
+// ─── Configuration OAuth « Dev Dashboard » (Client ID + Secret saisis dans l'UI) ─
+
+/**
+ * Enregistre (ou met à jour) les identifiants OAuth d'une app du nouveau
+ * Shopify Dev Dashboard. Le secret est chiffré AES-256-GCM — jamais en clair.
+ */
+export async function saveOAuthAppConfig(input: {
+  clientId: string;
+  clientSecret: string;
+  scopes: string;
+  appUrl: string;
+}): Promise<void> {
+  await query(
+    `insert into shopify_oauth_config (id, client_id, encrypted_client_secret, scopes, app_url, updated_at)
+     values ('singleton', $1, $2, $3, $4, now())
+     on conflict (id) do update set
+       client_id = excluded.client_id,
+       encrypted_client_secret = excluded.encrypted_client_secret,
+       scopes = excluded.scopes,
+       app_url = excluded.app_url,
+       updated_at = now()`,
+    [input.clientId, encryptSecret(input.clientSecret), input.scopes, input.appUrl.replace(/\/$/, "")]
+  );
+}
+
+/** Identifiants OAuth complets (secret déchiffré). Usage serveur uniquement. */
+export async function getOAuthAppConfig(): Promise<OAuthCredentials | null> {
+  const row = await queryOne<{
+    client_id: string;
+    encrypted_client_secret: string;
+    scopes: string;
+    app_url: string;
+  }>("select client_id, encrypted_client_secret, scopes, app_url from shopify_oauth_config where id = 'singleton'");
+  if (!row) return null;
+  try {
+    return {
+      clientId: row.client_id,
+      clientSecret: decryptSecret(row.encrypted_client_secret),
+      scopes: row.scopes,
+      appUrl: row.app_url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Vue publique (jamais le secret) pour pré-remplir l'interface. */
+export async function getOAuthAppConfigPublic(): Promise<{
+  clientId: string;
+  scopes: string;
+  appUrl: string;
+} | null> {
+  const row = await queryOne<{ client_id: string; scopes: string; app_url: string }>(
+    "select client_id, scopes, app_url from shopify_oauth_config where id = 'singleton'"
+  );
+  if (!row) return null;
+  return { clientId: row.client_id, scopes: row.scopes, appUrl: row.app_url };
+}
+
+/**
+ * Identifiants OAuth effectifs : la config Dev Dashboard saisie dans l'UI
+ * (base) prime, sinon repli sur les variables d'environnement de l'app Partner.
+ * Retourne null si aucune des deux sources n'est complète.
+ */
+export async function resolveOAuthCredentials(): Promise<OAuthCredentials | null> {
+  try {
+    const cfg = await getOAuthAppConfig();
+    if (cfg && cfg.clientId && cfg.clientSecret && cfg.appUrl) return cfg;
+  } catch {
+    // base injoignable : on tente le repli env ci-dessous
+  }
+  if (env.shopifyApiKey && env.shopifyApiSecret && env.shopifyAppUrl) {
+    return {
+      clientId: env.shopifyApiKey,
+      clientSecret: env.shopifyApiSecret,
+      scopes: env.shopifyScopes,
+      appUrl: env.shopifyAppUrl,
+    };
+  }
+  return null;
+}
+
 // ─── Boutiques & tokens ───────────────────────────────────────────────────────
 
 export async function getShopByDomain(domain: string): Promise<ShopRow | null> {
@@ -73,8 +156,10 @@ export async function upsertConnectedShop(input: {
   accessToken: string;
 }): Promise<ShopRow> {
   const shop = await queryOne<ShopRow>(
-    `insert into shops (shopify_domain, name, currency, timezone, api_status, installed_scopes, connected_at, uninstalled_at, updated_at)
-     values ($1, $2, coalesce($3, 'EUR'), coalesce($4, 'Europe/Paris'), 'connected', $5, now(), null, now())
+    `insert into shops (shopify_domain, name, currency, timezone, api_status, installed_scopes,
+        connected_at, uninstalled_at, connection_method, api_error, last_api_check_at, data_mode, updated_at)
+     values ($1, $2, coalesce($3, 'EUR'), coalesce($4, 'Europe/Paris'), 'connected', $5,
+        now(), null, 'oauth', null, now(), 'live', now())
      on conflict (shopify_domain) do update set
        name = coalesce(excluded.name, shops.name),
        currency = coalesce($3, shops.currency),
@@ -83,6 +168,10 @@ export async function upsertConnectedShop(input: {
        installed_scopes = excluded.installed_scopes,
        connected_at = now(),
        uninstalled_at = null,
+       connection_method = 'oauth',
+       api_error = null,
+       last_api_check_at = now(),
+       data_mode = 'live',
        updated_at = now()
      returning *`,
     [input.domain, input.name ?? null, input.currency ?? null, input.timezone ?? null, input.scopes]
@@ -537,7 +626,7 @@ export async function replaceAnomalies(
   }
 }
 
-// ─── Connexion manuelle par token Admin API (Option B) ───────────────────────
+// ─── Connexion manuelle par token Admin API (mode « Token Admin API ») ───────
 
 export async function upsertManualConnection(input: {
   domain: string;
