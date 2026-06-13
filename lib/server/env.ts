@@ -21,6 +21,21 @@ export const env = {
 /** Version d'API Shopify Admin utilisée partout. */
 export const SHOPIFY_API_VERSION = "2025-01";
 
+/**
+ * URL publique de l'application déployée. Utilisée pour pré-remplir les
+ * valeurs à copier dans le Shopify Dev Dashboard (URL d'app + redirection)
+ * quand SHOPIFY_APP_URL n'est pas défini côté serveur.
+ */
+export const DEFAULT_APP_URL =
+  env.shopifyAppUrl || "https://orkestra-data-lens-dkeyooi0-enzodms.vercel.app";
+
+/**
+ * Scopes recommandés pour une app du nouveau Dev Dashboard (lecture seule des
+ * données nécessaires à la réconciliation produits / commandes / clients).
+ */
+export const DEV_DASHBOARD_SCOPES =
+  "read_products,read_orders,read_customers,read_inventory,read_fulfillments";
+
 export function isOAuthConfigured(): boolean {
   return Boolean(env.shopifyApiKey && env.shopifyApiSecret && env.shopifyAppUrl && env.encryptionSecret);
 }

@@ -47,7 +47,9 @@ const SYNC_TASKS = [
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_shop: "Domaine invalide. Format attendu : ma-boutique.myshopify.com",
-  not_configured: "L'OAuth Shopify n'est pas configuré côté serveur (variables d'environnement manquantes).",
+  not_configured: "Base de données ou secret de chiffrement manquant côté serveur (DATABASE_URL, ENCRYPTION_SECRET).",
+  oauth_app_missing:
+    "Aucune app OAuth configurée. Renseignez le Client ID et le Client Secret de votre app Dev Dashboard ci-dessous.",
   invalid_hmac: "Signature Shopify invalide au retour d'autorisation. Réessayez la connexion.",
   invalid_state: "Session d'autorisation expirée ou invalide (protection anti-CSRF). Réessayez.",
   shop_mismatch: "La boutique du callback ne correspond pas à celle de la demande. Réessayez.",
@@ -70,6 +72,8 @@ export function OnboardingFlow({
   errorCode,
   missingConfig,
   pixelInstalled,
+  defaultAppUrl,
+  defaultScopes,
 }: {
   oauthConfigured: boolean;
   manualAvailable?: boolean;
@@ -79,6 +83,8 @@ export function OnboardingFlow({
   errorCode?: string;
   missingConfig?: string;
   pixelInstalled: boolean;
+  defaultAppUrl: string;
+  defaultScopes: string;
 }) {
   const router = useRouter();
   const live = Boolean(connectedShopDomain);
@@ -294,24 +300,24 @@ export function OnboardingFlow({
                 </div>
               )}
 
-              {/* Token Admin API — toujours visible (panneau de configuration si le serveur n'est pas prêt) */}
+              {/* Connexion boutique — deux modes : token Admin API ou app Dev Dashboard */}
               {!live && (
                 <div className={cn("pt-4", oauthConfigured && "mt-5 border-t border-ink/5")}>
                   <div className="mb-2 text-[12.5px] font-semibold">
-                    {oauthConfigured ? "Ou connexion rapide par token Admin API" : "Connexion par token Admin API"}
+                    Connecter votre boutique
                   </div>
                   <p className="mb-3 text-[11.5px] leading-relaxed text-ink-soft">
-                    Admin Shopify → Paramètres → Applications → <span className="font-medium">Développer des apps</span> →
-                    créez une app custom avec{" "}
-                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_products</code> et{" "}
-                    <code className="rounded bg-gray-100 px-1 text-[10.5px]">read_orders</code>, installez-la, puis
-                    collez le token <code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>. Vous pouvez
-                    coller l&apos;URL admin de votre boutique telle quelle.
+                    Choisissez votre méthode : un <span className="font-medium">token Admin API</span>{" "}
+                    (<code className="rounded bg-gray-100 px-1 text-[10.5px]">shpat_…</code>) si votre app custom en
+                    affiche un, ou une <span className="font-medium">app du nouveau Dev Dashboard</span> via Client ID +
+                    Client Secret (flux OAuth).
                   </p>
                   <ConnectShopify
                     oauthConfigured={false}
                     manualAvailable={manualAvailable}
                     missingConfig={missingEnv}
+                    defaultAppUrl={defaultAppUrl}
+                    defaultScopes={defaultScopes}
                     compact
                   />
                 </div>

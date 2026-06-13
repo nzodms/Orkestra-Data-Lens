@@ -1,6 +1,8 @@
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { getAppStatus } from "@/lib/server/datasource";
 import {
+  DEFAULT_APP_URL,
+  DEV_DASHBOARD_SCOPES,
   isDatabaseConfigured,
   isManualConnectAvailable,
   isOAuthConfigured,
@@ -38,6 +40,8 @@ export default async function OnboardingPage({
       errorCode={params.error}
       missingConfig={params.missing}
       pixelInstalled={status.pixelStatus === "installed"}
+      defaultAppUrl={DEFAULT_APP_URL}
+      defaultScopes={DEV_DASHBOARD_SCOPES}
     />
   );
 }

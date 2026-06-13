@@ -1,5 +1,39 @@
 # Changelog — Orkestra Data Lens
 
+## [0.7.0] — Connexion Shopify : deux modes (token Admin API + Dev Dashboard OAuth)
+
+### Le problème
+Le nouveau Shopify Dev Dashboard n'expose plus d'onglet « Configuration »
+avec un Admin API access token `shpat_` directement visible. La connexion
+était bloquée par l'erreur « Token inattendu — un Admin API access token
+commence par shpat_ ». Cette validation s'appliquait à tous les cas.
+
+### Désormais, un sélecteur de mode dans l'interface
+- **« J'ai un token Admin API »** : flux inchangé (domaine + `shpat_…` +
+  version d'API, test puis connexion). La validation `shpat_` ne concerne
+  **que** ce mode.
+- **« J'ai une app Shopify Dev Dashboard »** : flux OAuth complet à partir du
+  **Client ID** et du **Client Secret** affichés dans le Dev Dashboard. L'app
+  génère l'URL d'autorisation, redirige vers Shopify, **vérifie le HMAC** au
+  callback, **échange le code contre un access token**, le **stocke chiffré**
+  (AES-256-GCM), affiche les **scopes reçus**, puis autorise la **sync
+  produits/commandes**.
+
+### Détails
+- Le Client ID/Secret se saisissent dans l'UI (plus besoin des variables
+  `SHOPIFY_API_KEY`/`SECRET`) ; le secret est chiffré en base et jamais
+  réaffiché. Les variables d'environnement restent un repli possible.
+- Les **valeurs à recopier dans le Dev Dashboard** sont affichées avec un
+  bouton « Copier » : URL de l'application, URL de redirection
+  (`…/api/shopify/callback`), scopes requis
+  (`read_products,read_orders,read_customers,read_inventory,read_fulfillments`).
+- Nouvelle table `shopify_oauth_config` (migration `0006`), nouvelle route
+  `POST/GET /api/shopify/oauth-config`. Les routes `auth`/`callback` et la
+  vérification HMAC des webhooks utilisent les identifiants résolus
+  (config Dev Dashboard en base, sinon environnement).
+
+---
+
 ## [0.6.1] — Correctifs connexion : URL admin acceptée, fin de la « connexion simulée »
 
 - **L'URL admin fonctionne** : `https://admin.shopify.com/store/ma-boutique`,

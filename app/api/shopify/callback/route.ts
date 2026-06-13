@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySignedState } from "@/lib/server/crypto";
-import { isDatabaseConfigured, isOAuthConfigured } from "@/lib/server/env";
+import { isDatabaseConfigured, isManualConnectAvailable } from "@/lib/server/env";
 import { ensureWebPixel } from "@/lib/server/pixel";
-import { upsertConnectedShop } from "@/lib/server/repo";
+import { resolveOAuthCredentials, upsertConnectedShop } from "@/lib/server/repo";
 import {
   exchangeCodeForToken,
   fetchShopInfo,
@@ -24,10 +24,14 @@ export async function GET(req: NextRequest) {
   const fail = (code: string) =>
     NextResponse.redirect(new URL(`/onboarding?step=1&error=${code}`, req.nextUrl.origin));
 
-  if (!isOAuthConfigured() || !isDatabaseConfigured()) return fail("not_configured");
+  if (!isDatabaseConfigured() || !isManualConnectAvailable()) return fail("not_configured");
 
-  // 1. Authenticité de la requête (HMAC calculé sur la query string)
-  if (!verifyOAuthHmac(params)) {
+  const creds = await resolveOAuthCredentials();
+  if (!creds) return fail("oauth_app_missing");
+
+  // 1. Authenticité de la requête (HMAC calculé sur la query string, signé
+  // avec le Client Secret de l'app Dev Dashboard / Partner)
+  if (!verifyOAuthHmac(params, creds.clientSecret)) {
     console.warn("[oauth] HMAC de callback invalide");
     return fail("invalid_hmac");
   }
@@ -49,7 +53,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // 3. Échange code → access token
-    const { accessToken, scopes } = await exchangeCodeForToken(shopDomain, code);
+    const { accessToken, scopes } = await exchangeCodeForToken(shopDomain, code, creds);
 
     // 4. Infos boutique (nom, devise, fuseau) — non bloquant si refusé
     let info: { name?: string; currencyCode?: string; ianaTimezone?: string } = {};
@@ -69,8 +73,8 @@ export async function GET(req: NextRequest) {
       accessToken,
     });
 
-    // 6. Webhooks (orders, refunds, app/uninstalled)
-    const webhookResult = await registerWebhooks(shopDomain, accessToken);
+    // 6. Webhooks (orders, refunds, app/uninstalled) — callbacks sur l'URL de l'app
+    const webhookResult = await registerWebhooks(shopDomain, accessToken, creds.appUrl);
     if (webhookResult.errors.length > 0) {
       console.warn(`[oauth] Webhooks partiellement enregistrés pour ${shopDomain} :`, webhookResult.errors);
     }
