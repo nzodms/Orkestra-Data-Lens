@@ -1,19 +1,20 @@
 import "server-only";
 import { deployEnvironment, env, getServerAppUrl, isDatabaseConfigured } from "./env";
-import { query } from "./db";
+import { query, testDbConnection } from "./db";
+import { describeDbError, type DbError } from "./errors";
+import { parsedDatabaseUrl, presentDbEnvVars } from "./dbUrl";
 import { getMigrationStatus } from "./migrate";
 
 /**
  * Diagnostic serveur complet et factuel : variables d'environnement, connexion
- * PostgreSQL, présence des tables critiques, dernière migration détectée,
- * environnement de déploiement et URL d'app. Aucune valeur secrète n'est
- * exposée — uniquement des booléens et des noms de table.
+ * PostgreSQL (avec l'erreur RÉELLE en cas d'échec), présence des tables
+ * critiques, dernière migration, environnement et URL d'app. Aucune valeur
+ * secrète n'est exposée — le mot de passe DATABASE_URL est toujours masqué.
  */
 
 /**
- * Tables critiques au fonctionnement live. Note : la table de stockage des
- * tokens chiffrés s'appelle `shopify_tokens` dans ce schéma (il n'existe pas
- * de table `shopify_connections`).
+ * Tables critiques au fonctionnement live. Note : la table des tokens chiffrés
+ * s'appelle `shopify_tokens` (il n'existe pas de table `shopify_connections`).
  */
 export const CRITICAL_TABLES = [
   "shops",
@@ -26,21 +27,29 @@ export const CRITICAL_TABLES = [
   "sync_runs",
 ] as const;
 
-export type DiagnosticCheck = {
-  key: string;
-  label: string;
-  ok: boolean;
-  detail: string;
-};
+export type DiagnosticCheck = { key: string; label: string; ok: boolean; detail: string };
 
 export type SystemDiagnostic = {
   ok: boolean;
-  environment: string;
+  runtime: string;
+  vercelEnv: string;
   appUrl: string;
   databaseUrlPresent: boolean;
   encryptionSecretPresent: boolean;
   encryptionSecretValid: boolean;
   dbConnected: boolean;
+  dbSelect1: unknown | null;
+  /** Erreur PostgreSQL réelle si la connexion échoue (jamais de mot de passe). */
+  dbError: DbError | null;
+  // URL masquée + composants extraits (sans mot de passe)
+  databaseUrlMasked: string | null;
+  databaseUrlHost: string | null;
+  databaseUrlUser: string | null;
+  databaseUrlPort: string | null;
+  databaseUrlDatabase: string | null;
+  databaseUrlHasSslMode: boolean;
+  databaseUrlParseError?: string;
+  detectedDbEnvVars: string[];
   tables: { name: string; present: boolean }[];
   missingTables: string[];
   oauthTablePresent: boolean;
@@ -53,25 +62,39 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
   const databaseUrlPresent = isDatabaseConfigured();
   const encryptionSecretPresent = Boolean(env.encryptionSecret);
   const encryptionSecretValid = env.encryptionSecret.length >= 32;
-  const environment = deployEnvironment();
+  const vercelEnv = deployEnvironment();
   const appUrl = getServerAppUrl();
+  const parsed = parsedDatabaseUrl();
+  const detectedDbEnvVars = presentDbEnvVars();
 
   let dbConnected = false;
+  let dbSelect1: unknown | null = null;
+  let dbError: DbError | null = null;
   let tables: { name: string; present: boolean }[] = CRITICAL_TABLES.map((name) => ({ name, present: false }));
   let missingTables: string[] = [...CRITICAL_TABLES];
   let lastMigration: string | null = null;
   let pendingMigrations: string[] = [];
 
   if (databaseUrlPresent) {
+    // Test de connexion isolé : capture l'erreur réelle (code/message/detail/hint).
+    const test = await testDbConnection();
+    if (test.ok) {
+      dbConnected = true;
+      dbSelect1 = test.select1;
+    } else {
+      dbError = describeDbError(test.error);
+    }
+  }
+
+  // Les tables/migrations ne sont inspectées QUE si la connexion fonctionne.
+  if (dbConnected) {
     try {
       const rows = await query<{ table_name: string }>(
         `select table_name from information_schema.tables where table_schema = 'public'`
       );
-      dbConnected = true;
       const present = new Set(rows.map((r) => r.table_name));
       tables = CRITICAL_TABLES.map((name) => ({ name, present: present.has(name) }));
       missingTables = tables.filter((t) => !t.present).map((t) => t.name);
-
       try {
         const status = await getMigrationStatus();
         lastMigration = status.last;
@@ -79,19 +102,30 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
       } catch {
         // table _migrations absente : migrations jamais appliquées via le runner
       }
-    } catch {
-      dbConnected = false;
+    } catch (err) {
+      // Connexion OK mais lecture du schéma impossible : on remonte l'erreur réelle.
+      dbError = describeDbError(err);
     }
   }
 
-  const oauthTablePresent = tables.find((t) => t.name === "shopify_oauth_config")?.present ?? false;
+  const oauthTablePresent = dbConnected && (tables.find((t) => t.name === "shopify_oauth_config")?.present ?? false);
+
+  const dbDetail = !databaseUrlPresent
+    ? "DATABASE_URL absent"
+    : dbConnected
+      ? `Connexion OK (${parsed.host ?? "?"}:${parsed.port ?? "?"}) · select 1 = ${JSON.stringify(dbSelect1)}`
+      : dbError
+        ? `${dbError.message} [${dbError.code}] — ${dbError.hint}`
+        : "Connexion impossible";
 
   const checks: DiagnosticCheck[] = [
     {
       key: "database_url",
       label: "DATABASE_URL présent",
       ok: databaseUrlPresent,
-      detail: databaseUrlPresent ? "Variable configurée" : "DATABASE_URL absent des variables d'environnement",
+      detail: databaseUrlPresent
+        ? `${parsed.masked ?? "(non parsable)"}${parsed.parseError ? ` · URL invalide : ${parsed.parseError}` : ""}`
+        : "DATABASE_URL absent des variables d'environnement",
     },
     {
       key: "encryption_secret",
@@ -107,35 +141,13 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
       key: "db_connected",
       label: "Base PostgreSQL connectée",
       ok: dbConnected,
-      detail: !databaseUrlPresent
-        ? "DATABASE_URL absent"
-        : dbConnected
-          ? "Connexion PostgreSQL établie"
-          : "Connexion impossible (vérifier DATABASE_URL / réseau Supabase)",
-    },
-    {
-      key: "migrations",
-      label: "Migrations OK",
-      ok: dbConnected && missingTables.length === 0,
-      detail: !dbConnected
-        ? "Base non connectée"
-        : missingTables.length === 0
-          ? `Toutes les tables critiques présentes (dernière migration : ${lastMigration ?? "inconnue"})`
-          : missingTables.map((t) => `Migration manquante : table ${t} absente.`).join(" "),
-    },
-    {
-      key: "oauth_table",
-      label: "Table OAuth OK",
-      ok: oauthTablePresent,
-      detail: oauthTablePresent
-        ? "Table shopify_oauth_config présente"
-        : "Migration manquante : table shopify_oauth_config absente.",
+      detail: dbDetail,
     },
     {
       key: "environment",
       label: "Environnement",
       ok: true,
-      detail: environment,
+      detail: `${vercelEnv} · runtime nodejs`,
     },
     {
       key: "app_url",
@@ -144,6 +156,36 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
       detail: appUrl || "Origine de la requête (NEXT_PUBLIC_APP_URL non défini)",
     },
   ];
+
+  // On ne parle de migrations / table OAuth QUE si la connexion DB fonctionne.
+  if (dbConnected) {
+    checks.push(
+      {
+        key: "migrations",
+        label: "Migrations OK",
+        ok: missingTables.length === 0,
+        detail:
+          missingTables.length === 0
+            ? `Toutes les tables critiques présentes (dernière migration : ${lastMigration ?? "inconnue"})`
+            : missingTables.map((t) => `Migration manquante : table ${t} absente.`).join(" "),
+      },
+      {
+        key: "oauth_table",
+        label: "Table OAuth OK",
+        ok: oauthTablePresent,
+        detail: oauthTablePresent
+          ? "Table shopify_oauth_config présente"
+          : "Migration manquante : table shopify_oauth_config absente.",
+      }
+    );
+  } else {
+    checks.push({
+      key: "migrations",
+      label: "Migrations",
+      ok: false,
+      detail: "En attente de la connexion DB — corrigez d'abord la connexion ci-dessus (les migrations ne peuvent pas s'exécuter).",
+    });
+  }
 
   const ok =
     databaseUrlPresent &&
@@ -154,12 +196,23 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
 
   return {
     ok,
-    environment,
+    runtime: "nodejs",
+    vercelEnv,
     appUrl,
     databaseUrlPresent,
     encryptionSecretPresent,
     encryptionSecretValid,
     dbConnected,
+    dbSelect1,
+    dbError,
+    databaseUrlMasked: parsed.masked,
+    databaseUrlHost: parsed.host,
+    databaseUrlUser: parsed.user,
+    databaseUrlPort: parsed.port,
+    databaseUrlDatabase: parsed.database,
+    databaseUrlHasSslMode: parsed.hasSslMode,
+    databaseUrlParseError: parsed.parseError,
+    detectedDbEnvVars,
     tables,
     missingTables,
     oauthTablePresent,

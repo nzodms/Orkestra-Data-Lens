@@ -16,14 +16,32 @@ import { toast } from "@/components/ui/Toaster";
 import { cn } from "@/lib/utils";
 
 type DiagnosticCheck = { key: string; label: string; ok: boolean; detail: string };
+type DbError = {
+  name: string;
+  code: string;
+  message: string;
+  detail: string;
+  hint: string;
+  category: string;
+};
 type Diagnostic = {
   ok: boolean;
-  environment: string;
+  runtime?: string;
+  vercelEnv?: string;
   appUrl: string;
   checks: DiagnosticCheck[];
   missingTables: string[];
   lastMigration: string | null;
   pendingMigrations: string[];
+  dbConnected?: boolean;
+  dbError?: DbError | null;
+  databaseUrlMasked?: string | null;
+  databaseUrlHost?: string | null;
+  databaseUrlUser?: string | null;
+  databaseUrlPort?: string | null;
+  databaseUrlDatabase?: string | null;
+  databaseUrlHasSslMode?: boolean;
+  detectedDbEnvVars?: string[];
 };
 
 /**
@@ -147,8 +165,38 @@ export function ServerDiagnostic({
         ))}
       </div>
 
-      {/* Application des migrations sans terminal local */}
-      {!diag.ok && diag.missingTables.length > 0 && (
+      {/* Connexion PostgreSQL : URL masquée + composants extraits (sans mot de passe) */}
+      <div className="inset-panel grid grid-cols-2 gap-x-4 gap-y-1.5 p-3 text-[11.5px] sm:grid-cols-3">
+        <Info label="Host" value={diag.databaseUrlHost ?? "—"} />
+        <Info label="User" value={diag.databaseUrlUser ?? "—"} />
+        <Info label="Port" value={diag.databaseUrlPort ?? "—"} />
+        <Info label="Database" value={diag.databaseUrlDatabase ?? "—"} />
+        <Info label="sslmode" value={diag.databaseUrlHasSslMode ? "présent" : "absent"} />
+        <Info label="Runtime" value={diag.runtime ?? "nodejs"} />
+        <Info label="Vercel env" value={diag.vercelEnv ?? "—"} />
+        <Info label="Vars DB détectées" value={(diag.detectedDbEnvVars ?? []).join(", ") || "—"} />
+        <Info label="URL masquée" value={diag.databaseUrlMasked ?? "—"} full />
+      </div>
+
+      {/* Erreur PostgreSQL réelle */}
+      {diag.dbError && (
+        <div className="rounded-xl border border-critical/25 bg-critical-soft/40 p-3">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-critical">
+            <XCircle size={14} /> Connexion PostgreSQL échouée — cause réelle
+          </div>
+          <dl className="mt-1.5 space-y-1 text-[11.5px]">
+            <ErrRow label="name" value={diag.dbError.name} />
+            <ErrRow label="code" value={diag.dbError.code} />
+            <ErrRow label="category" value={diag.dbError.category} />
+            <ErrRow label="message" value={diag.dbError.message} />
+            {diag.dbError.detail && <ErrRow label="detail" value={diag.dbError.detail} />}
+            <ErrRow label="hint" value={diag.dbError.hint} highlight />
+          </dl>
+        </div>
+      )}
+
+      {/* Application des migrations sans terminal local — uniquement si la DB répond */}
+      {diag.dbConnected && !diag.ok && diag.missingTables.length > 0 && (
         <div className="rounded-xl border border-warn/25 bg-warn-soft/50 p-3">
           <div className="text-[12px] font-semibold text-warn">
             {diag.missingTables.map((t) => `Migration manquante : table ${t} absente.`).join(" ")}
@@ -161,20 +209,29 @@ export function ServerDiagnostic({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setShowMigrate((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-strong"
-        >
-          <Play size={14} /> Appliquer les migrations
-        </button>
-        <button
-          onClick={() => setShowSql((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12.5px] font-semibold shadow-sm hover:bg-white"
-        >
-          <Database size={14} /> {showSql ? "Masquer" : "Afficher"} le SQL Supabase
-        </button>
-      </div>
+      {!diag.dbConnected && (
+        <p className="rounded-xl bg-ink/[0.03] px-3 py-2 text-[11.5px] leading-relaxed text-ink-soft">
+          Connexion à la base requise avant toute migration : corrigez d&apos;abord la connexion PostgreSQL ci-dessus.
+          L&apos;application des migrations apparaîtra ici une fois la base joignable.
+        </p>
+      )}
+
+      {diag.dbConnected && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShowMigrate((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-strong"
+            >
+              <Play size={14} /> Appliquer les migrations
+            </button>
+            <button
+              onClick={() => setShowSql((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/70 px-3.5 py-2 text-[12.5px] font-semibold shadow-sm hover:bg-white"
+            >
+              <Database size={14} /> {showSql ? "Masquer" : "Afficher"} le SQL Supabase
+            </button>
+          </div>
 
       {showMigrate && (
         <div className="inset-panel space-y-2 p-3">
@@ -240,6 +297,28 @@ export function ServerDiagnostic({
           </p>
         </div>
       )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Info({ label, value, full = false }: { label: string; value: string; full?: boolean }) {
+  return (
+    <div className={cn("min-w-0", full && "col-span-2 sm:col-span-3")}>
+      <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className="truncate font-medium text-ink" title={value}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ErrRow({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-16 shrink-0 font-semibold text-ink-soft">{label}</dt>
+      <dd className={cn("min-w-0 flex-1 break-words", highlight ? "font-medium text-critical" : "text-ink")}>{value}</dd>
     </div>
   );
 }
