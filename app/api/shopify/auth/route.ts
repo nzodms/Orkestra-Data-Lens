@@ -36,18 +36,27 @@ export async function GET(req: NextRequest) {
   }
 
   const state = randomOAuthState();
+  const stateHash = hashOAuthState(state);
+  const returnTo = req.nextUrl.origin;
   try {
     await purgeExpiredOAuthStates();
-    await createOAuthState({
-      stateHash: hashOAuthState(state),
-      shopDomain,
-      returnTo: req.nextUrl.origin,
-      ttlMinutes: 10,
-    });
+    await createOAuthState({ stateHash, shopDomain, returnTo, ttlMinutes: 10 });
   } catch (err) {
     console.error("[oauth] Stockage du state impossible :", err instanceof Error ? err.message : err);
     return NextResponse.redirect(new URL(`/onboarding?step=1&error=state_store_failed`, req.nextUrl.origin));
   }
 
-  return NextResponse.redirect(buildAuthorizeUrl(shopDomain, state, creds));
+  const authorizeUrl = buildAuthorizeUrl(shopDomain, state, creds);
+  console.log(
+    "[oauth/auth]",
+    JSON.stringify({
+      rawShopInput: raw,
+      normalizedShop: shopDomain,
+      shopDomainUsedInAuthorizeUrl: shopDomain,
+      stateHash,
+      returnTo,
+    })
+  );
+
+  return NextResponse.redirect(authorizeUrl);
 }
