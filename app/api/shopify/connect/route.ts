@@ -6,7 +6,7 @@ import { upsertManualConnection } from "@/lib/server/repo";
 import { normalizeShopDomain, testConnection } from "@/lib/server/shopify";
 
 /**
- * POST /api/shopify/connect — Option B : connexion par token Admin API manuel.
+ * POST /api/shopify/connect — Mode « Token Admin API » : connexion par token manuel.
  * body : { domain, token, apiVersion?, dryRun? }
  *
  * dryRun = true → « Tester la connexion » : requêtes réelles vers Shopify

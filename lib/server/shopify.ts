@@ -248,7 +248,7 @@ export function shopifyIdToNumeric(gid: string | number | null | undefined): str
   return match ? match[1] : s;
 }
 
-// ─── Connexion par token Admin API manuel (Option B) ─────────────────────────
+// ─── Connexion par token Admin API manuel (mode « Token Admin API ») ─────────
 
 export type ConnectionTest = {
   ok: boolean;

@@ -626,7 +626,7 @@ export async function replaceAnomalies(
   }
 }
 
-// ─── Connexion manuelle par token Admin API (Option B) ───────────────────────
+// ─── Connexion manuelle par token Admin API (mode « Token Admin API ») ───────
 
 export async function upsertManualConnection(input: {
   domain: string;
