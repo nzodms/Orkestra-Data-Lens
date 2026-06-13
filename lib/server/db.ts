@@ -1,7 +1,7 @@
 import "server-only";
 import { Client, Pool, type QueryResultRow } from "pg";
 import { env, isDatabaseConfigured } from "./env";
-import { sslConfigFor } from "./dbUrl";
+import { pgClientConfig } from "./dbUrl";
 
 /**
  * Pool PostgreSQL partagé (singleton survivant au hot-reload Next).
@@ -16,13 +16,11 @@ export function getPool(): Pool {
     throw new DbNotConfiguredError();
   }
   if (!globalForDb.__orkestraPool) {
+    // Config centralisée : sslmode retiré de l'URL + objet ssl explicite
+    // (sinon pg ignore rejectUnauthorized:false → self-signed cert error).
     globalForDb.__orkestraPool = new Pool({
-      connectionString: env.databaseUrl,
+      ...pgClientConfig(env.databaseUrl),
       max: 5,
-      // SSL forcé en distant (Supabase pooler/direct) — jamais ignoré.
-      ssl: sslConfigFor(env.databaseUrl),
-      // Échec rapide plutôt qu'un blocage si l'hôte/port est injoignable.
-      connectionTimeoutMillis: 10_000,
       keepAlive: true,
     });
   }
@@ -72,10 +70,9 @@ export async function testDbConnection(): Promise<
   { ok: true; select1: unknown } | { ok: false; error: unknown }
 > {
   if (!isDatabaseConfigured()) return { ok: false, error: new DbNotConfiguredError() };
+  // Même config centralisée que le pool (SSL objet explicite, sslmode retiré).
   const client = new Client({
-    connectionString: env.databaseUrl,
-    ssl: sslConfigFor(env.databaseUrl),
-    connectionTimeoutMillis: 10_000,
+    ...pgClientConfig(env.databaseUrl),
     query_timeout: 10_000,
     statement_timeout: 10_000,
   });
