@@ -20,6 +20,7 @@ export const CRITICAL_TABLES = [
   "shops",
   "shopify_tokens",
   "shopify_oauth_config",
+  "oauth_states",
   "products",
   "orders",
   "order_line_items",
@@ -109,6 +110,7 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
   }
 
   const oauthTablePresent = dbConnected && (tables.find((t) => t.name === "shopify_oauth_config")?.present ?? false);
+  const oauthStatesTablePresent = dbConnected && (tables.find((t) => t.name === "oauth_states")?.present ?? false);
 
   const dbDetail = !databaseUrlPresent
     ? "DATABASE_URL absent"
@@ -176,6 +178,14 @@ export async function runSystemDiagnostic(): Promise<SystemDiagnostic> {
         detail: oauthTablePresent
           ? "Table shopify_oauth_config présente"
           : "Migration manquante : table shopify_oauth_config absente.",
+      },
+      {
+        key: "oauth_state_storage",
+        label: "OAuth state storage OK",
+        ok: oauthStatesTablePresent,
+        detail: oauthStatesTablePresent
+          ? "Stockage DB du state anti-CSRF (table oauth_states) — robuste serverless, pas de dépendance cookie."
+          : "Migration manquante : table oauth_states absente.",
       }
     );
   } else {

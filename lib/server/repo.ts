@@ -127,6 +127,55 @@ export async function resolveOAuthCredentials(): Promise<OAuthCredentials | null
   return null;
 }
 
+// ─── State OAuth anti-CSRF (stocké en base, robuste serverless) ──────────────
+
+/** Crée un state OAuth : seul le hash est persisté, expiration 10 min. */
+export async function createOAuthState(input: {
+  stateHash: string;
+  shopDomain: string;
+  returnTo?: string | null;
+  ttlMinutes?: number;
+}): Promise<void> {
+  await query(
+    `insert into oauth_states (state_hash, shop_domain, return_to, expires_at)
+     values ($1, $2, $3, now() + ($4 || ' minutes')::interval)`,
+    [input.stateHash, input.shopDomain, input.returnTo ?? null, String(input.ttlMinutes ?? 10)]
+  );
+}
+
+export type OAuthStateResult =
+  | { status: "ok"; shopDomain: string; returnTo: string | null }
+  | { status: "absent" | "expired" | "used" };
+
+/**
+ * Consomme un state OAuth de façon atomique : marque `used_at` et renvoie la
+ * ligne si elle est valide (présente, non expirée, non utilisée). Sinon
+ * distingue précisément la raison (absent / expiré / déjà utilisé).
+ */
+export async function consumeOAuthState(stateHash: string): Promise<OAuthStateResult> {
+  const valid = await queryOne<{ shop_domain: string; return_to: string | null }>(
+    `update oauth_states set used_at = now()
+     where state_hash = $1 and used_at is null and expires_at > now()
+     returning shop_domain, return_to`,
+    [stateHash]
+  );
+  if (valid) return { status: "ok", shopDomain: valid.shop_domain, returnTo: valid.return_to };
+
+  // Échec : déterminer pourquoi (pour un message précis au callback).
+  const row = await queryOne<{ used_at: string | null; expires_at: string }>(
+    `select used_at, expires_at from oauth_states where state_hash = $1`,
+    [stateHash]
+  );
+  if (!row) return { status: "absent" };
+  if (row.used_at) return { status: "used" };
+  return { status: "expired" };
+}
+
+/** Purge best-effort des states expirés (appelée à la création d'un nouveau). */
+export async function purgeExpiredOAuthStates(): Promise<void> {
+  await query(`delete from oauth_states where expires_at < now() - interval '1 hour'`).catch(() => {});
+}
+
 // ─── Boutiques & tokens ───────────────────────────────────────────────────────
 
 export async function getShopByDomain(domain: string): Promise<ShopRow | null> {
