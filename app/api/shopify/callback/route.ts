@@ -24,8 +24,11 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const fail = (code: string) =>
-    NextResponse.redirect(new URL(`/onboarding?step=1&error=${code}`, req.nextUrl.origin));
+  const fail = (code: string, extra?: Record<string, string>) => {
+    const url = new URL(`/onboarding?step=1&error=${code}`, req.nextUrl.origin);
+    for (const [k, v] of Object.entries(extra ?? {})) url.searchParams.set(k, v);
+    return NextResponse.redirect(url);
+  };
 
   if (!isDatabaseConfigured() || !isManualConnectAvailable()) return fail("not_configured");
 
@@ -55,8 +58,30 @@ export async function GET(req: NextRequest) {
     return fail(code);
   }
 
-  const shopDomain = normalizeShopDomain(params.get("shop") ?? "");
-  if (!shopDomain || shopDomain !== stateResult.shopDomain) return fail("shop_mismatch");
+  // Comparaison boutique attendue (depuis oauth_states) vs reçue (callback Shopify).
+  const rawCallbackShop = params.get("shop") ?? "";
+  const normalizedCallbackShop = normalizeShopDomain(rawCallbackShop);
+  const expectedShopDomain = stateResult.shopDomain;
+  const normalizedExpectedShop = normalizeShopDomain(expectedShopDomain) ?? expectedShopDomain;
+
+  console.log(
+    "[oauth/callback]",
+    JSON.stringify({
+      rawCallbackShop,
+      normalizedCallbackShop,
+      expectedShopDomain,
+      normalizedExpectedShop,
+      match: normalizedCallbackShop === normalizedExpectedShop,
+    })
+  );
+
+  if (!normalizedCallbackShop || normalizedCallbackShop !== normalizedExpectedShop) {
+    return fail("shop_mismatch", {
+      shopExpected: normalizedExpectedShop || "(vide)",
+      shopReceived: normalizedCallbackShop || rawCallbackShop || "(vide)",
+    });
+  }
+  const shopDomain = normalizedCallbackShop;
 
   const code = params.get("code");
   if (!code) return fail("missing_code");

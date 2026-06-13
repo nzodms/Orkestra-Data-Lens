@@ -11,18 +11,43 @@ import { env, SHOPIFY_API_VERSION } from "./env";
 // ─── Validation du domaine boutique ──────────────────────────────────────────
 
 /**
- * Normalise toutes les façons usuelles de désigner une boutique :
- *  - ma-boutique.myshopify.com (avec ou sans https://, avec ou sans chemin)
- *  - https://admin.shopify.com/store/ma-boutique[/…]  (lien admin)
- *  - ma-boutique  (handle nu)
+ * Normalise toutes les façons usuelles de désigner une boutique vers la forme
+ * canonique `<handle>.myshopify.com` :
+ *  - lumi-o.myshopify.com (avec/sans https://, avec/sans /admin ou chemin)
+ *  - https://admin.shopify.com/store/lumi-o[/…]  (lien admin)
+ *  - lumi-o  (handle nu)
+ *
+ * Fonction unique partagée par auth, callback, connect et oauth-config.
+ * Retourne null uniquement si aucun handle exploitable n'est trouvé.
  */
-export function normalizeShopDomain(raw: string): string | null {
-  let s = raw.trim().toLowerCase().replace(/^https?:\/\//, "");
-  const adminMatch = s.match(/^admin\.shopify\.com\/store\/([a-z0-9][a-z0-9-]*)/);
-  if (adminMatch) return `${adminMatch[1]}.myshopify.com`;
-  s = s.replace(/\/.*$/, "").replace(/\?.*$/, "");
-  if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(s)) return s;
-  if (/^[a-z0-9][a-z0-9-]*$/.test(s)) return `${s}.myshopify.com`;
+export function normalizeShopDomain(input: string): string | null {
+  if (!input) return null;
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  // https://admin.shopify.com/store/lumi-o
+  const adminMatch = trimmed.match(/admin\.shopify\.com\/store\/([^/?#]+)/);
+  if (adminMatch?.[1]) {
+    const handle = adminMatch[1].replace(/\/+$/, "");
+    return /^[a-z0-9][a-z0-9-]*$/.test(handle) ? `${handle}.myshopify.com` : null;
+  }
+
+  // https://lumi-o.myshopify.com/admin · https://lumi-o.myshopify.com · lumi-o
+  const cleaned = trimmed
+    .replace(/^https?:\/\//, "")
+    .replace(/\/admin.*$/, "")
+    .replace(/[/?#].*$/, "")
+    .replace(/\s+/g, "");
+  if (!cleaned) return null;
+
+  if (cleaned.endsWith(".myshopify.com")) {
+    const handle = cleaned.slice(0, -".myshopify.com".length);
+    return /^[a-z0-9][a-z0-9-]*$/.test(handle) ? cleaned : null;
+  }
+
+  // Handle nu (pas d'autre point) → on suffixe .myshopify.com
+  if (/^[a-z0-9][a-z0-9-]*$/.test(cleaned)) return `${cleaned}.myshopify.com`;
+
   return null;
 }
 

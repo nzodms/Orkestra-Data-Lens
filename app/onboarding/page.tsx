@@ -19,7 +19,15 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ step?: string; connected?: string; shop?: string; error?: string; missing?: string }>;
+  searchParams: Promise<{
+    step?: string;
+    connected?: string;
+    shop?: string;
+    error?: string;
+    missing?: string;
+    shopExpected?: string;
+    shopReceived?: string;
+  }>;
 }) {
   const params = await searchParams;
   const status = await getAppStatus();
@@ -39,6 +47,8 @@ export default async function OnboardingPage({
       connectedShopDomain={connectedDomain}
       errorCode={params.error}
       missingConfig={params.missing}
+      shopExpected={params.shopExpected}
+      shopReceived={params.shopReceived}
       pixelInstalled={status.pixelStatus === "installed"}
       defaultAppUrl={DEFAULT_APP_URL}
       defaultScopes={DEV_DASHBOARD_SCOPES}

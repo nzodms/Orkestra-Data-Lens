@@ -75,6 +75,8 @@ export function OnboardingFlow({
   connectedShopDomain,
   errorCode,
   missingConfig,
+  shopExpected,
+  shopReceived,
   pixelInstalled,
   defaultAppUrl,
   defaultScopes,
@@ -86,6 +88,8 @@ export function OnboardingFlow({
   connectedShopDomain?: string;
   errorCode?: string;
   missingConfig?: string;
+  shopExpected?: string;
+  shopReceived?: string;
   pixelInstalled: boolean;
   defaultAppUrl: string;
   defaultScopes: string;
@@ -252,6 +256,13 @@ export function OnboardingFlow({
                     {error}
                     {errorCode === "not_configured" && missingConfig && (
                       <span className="mt-1 block font-normal">Manquant : {missingConfig}</span>
+                    )}
+                    {errorCode === "shop_mismatch" && (shopExpected || shopReceived) && (
+                      <span className="mt-1 block font-mono text-[11px] font-normal">
+                        Boutique attendue : {shopExpected ?? "—"}
+                        <br />
+                        Boutique reçue : {shopReceived ?? "—"}
+                      </span>
                     )}
                   </span>
                 </div>
