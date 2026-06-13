@@ -1,15 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipboardCheck, Copy } from "lucide-react";
+import { getClientAppUrl } from "@/lib/utils";
 
 /**
  * Valeurs à recopier dans le Shopify Dev Dashboard (URL d'app, URL de
  * redirection OAuth, scopes requis). Toujours visibles dans les Paramètres,
  * même une fois la boutique connectée, pour reconfigurer l'app si besoin.
+ *
+ * L'URL d'app vient du serveur (NEXT_PUBLIC_APP_URL / Vercel) si connue, sinon
+ * de l'origine réelle de la page — jamais d'URL codée en dur.
  */
 export function ShopifyAppValues({ appUrl, scopes }: { appUrl: string; scopes: string }) {
-  const base = appUrl.replace(/\/$/, "");
+  const [base, setBase] = useState((appUrl || "").replace(/\/$/, ""));
+  useEffect(() => {
+    setBase((prev) => prev || getClientAppUrl());
+  }, []);
   return (
     <div className="space-y-2">
       <CopyField label="URL de l'application" value={base} />

@@ -4,6 +4,19 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
+/**
+ * URL publique de l'app, côté client. Préfère NEXT_PUBLIC_APP_URL (domaine
+ * stable de production), sinon l'origine réelle de la page — jamais une URL
+ * codée en dur. À utiliser dans un effet (post-montage) pour éviter tout
+ * décalage d'hydratation.
+ */
+export function getClientAppUrl(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
+  return "";
+}
+
 // ─── Formatage ────────────────────────────────────────────────────────────────
 
 export function formatEUR(value: number, opts?: { decimals?: number }) {

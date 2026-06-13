@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isManualConnectAvailable } from "@/lib/server/env";
+import { describeServerError } from "@/lib/server/errors";
 import { getOAuthAppConfig, getOAuthAppConfigPublic, saveOAuthAppConfig } from "@/lib/server/repo";
 import { normalizeShopDomain } from "@/lib/server/shopify";
+
+export const runtime = "nodejs";
 
 /**
  * Configuration OAuth « Dev Dashboard » saisie dans l'interface.
@@ -63,7 +66,16 @@ export async function POST(req: NextRequest) {
   // Secret : nouvelle saisie, sinon on conserve celui déjà enregistré.
   let clientSecret = parsed.data.clientSecret;
   if (!clientSecret) {
-    const existing = await getOAuthAppConfig().catch(() => null);
+    let existing;
+    try {
+      existing = await getOAuthAppConfig();
+    } catch (err) {
+      // Lecture de la config existante impossible : on remonte la cause réelle
+      // (table absente, base injoignable, déchiffrement…).
+      const described = describeServerError(err, { table: "shopify_oauth_config" });
+      console.error("[oauth-config] Lecture config échouée :", described.detail);
+      return NextResponse.json({ ok: false, error: described.message, code: described.code }, { status: 500 });
+    }
     if (!existing?.clientSecret) {
       return NextResponse.json(
         { ok: false, error: "Client Secret requis (aucun secret enregistré pour le moment)." },
@@ -83,8 +95,11 @@ export async function POST(req: NextRequest) {
   try {
     await saveOAuthAppConfig({ clientId, clientSecret, scopes: normalizedScopes, appUrl });
   } catch (err) {
-    console.error("[oauth-config] Échec de l'enregistrement :", err instanceof Error ? err.message : err);
-    return NextResponse.json({ ok: false, error: "Erreur interne lors de l'enregistrement." }, { status: 500 });
+    // Erreur réelle remontée au client : table absente, base injoignable,
+    // chiffrement échoué, contrainte SQL… — jamais « Erreur interne » générique.
+    const described = describeServerError(err, { table: "shopify_oauth_config" });
+    console.error("[oauth-config] Échec de l'enregistrement :", described.code, described.detail);
+    return NextResponse.json({ ok: false, error: described.message, code: described.code }, { status: 500 });
   }
 
   // Si une boutique est fournie, on renvoie l'URL OAuth interne à suivre.

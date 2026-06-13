@@ -19,7 +19,10 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Card, CardTitle } from "@/components/ui/Card";
 import { PixelButton } from "@/components/domain/PixelButton";
 import { ConnectShopify } from "@/components/settings/ConnectShopify";
+import { ServerDiagnostic } from "@/components/settings/ServerDiagnostic";
 import { ShopifyAppValues } from "@/components/settings/ShopifyAppValues";
+import { getAllMigrationsSql } from "@/lib/server/migrate";
+import { runSystemDiagnostic } from "@/lib/server/systemDiagnostic";
 import {
   DataModeSwitch,
   DisconnectButton,
@@ -61,6 +64,7 @@ export default async function SettingsPage() {
   const hasConnection = Boolean(status.shopDomain); // connectée, même si bascule démo forcée
   const lastSync = status.lastSync;
   const diagnostic = runConnectionDiagnostic(status);
+  const [serverDiag, migrationsSql] = [await runSystemDiagnostic(), getAllMigrationsSql()];
 
   // Badge d'état de connexion le plus précis possible — jamais de faux statut
   const connectionBadge = !hasConnection ? (
@@ -135,6 +139,16 @@ export default async function SettingsPage() {
             </p>
           </div>
         )}
+      </Card>
+
+      {/* Diagnostic serveur : env, DB, migrations, table OAuth, environnement, URL */}
+      <Card>
+        <CardTitle sub="État réel du serveur : variables, base PostgreSQL, migrations et table OAuth. Appliquez les migrations sans terminal local.">
+          <span className="inline-flex items-center gap-1.5">
+            <Database size={15} className="text-ink-soft" /> Diagnostic serveur
+          </span>
+        </CardTitle>
+        <ServerDiagnostic initial={serverDiag} migrationsSql={migrationsSql} />
       </Card>
 
       {/* Valeurs à copier dans le Shopify Dev Dashboard */}

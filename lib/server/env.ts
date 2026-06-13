@@ -22,12 +22,26 @@ export const env = {
 export const SHOPIFY_API_VERSION = "2025-01";
 
 /**
- * URL publique de l'application déployée. Utilisée pour pré-remplir les
- * valeurs à copier dans le Shopify Dev Dashboard (URL d'app + redirection)
- * quand SHOPIFY_APP_URL n'est pas défini côté serveur.
+ * URL publique de l'application, détectée côté serveur — jamais codée en dur.
+ * Ordre : NEXT_PUBLIC_APP_URL > SHOPIFY_APP_URL > domaine de production Vercel >
+ * URL de déploiement Vercel. Vide si indéterminable : le client utilisera alors
+ * l'origine réelle de la page (window.location.origin).
  */
-export const DEFAULT_APP_URL =
-  env.shopifyAppUrl || "https://orkestra-data-lens-dkeyooi0-enzodms.vercel.app";
+export function getServerAppUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL || env.shopifyAppUrl;
+  if (explicit) return explicit.replace(/\/$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
+  return "";
+}
+
+/** Conservé pour compatibilité : valeur serveur (peut être vide). */
+export const DEFAULT_APP_URL = getServerAppUrl();
+
+/** Environnement de déploiement Vercel : "production", "preview", "development". */
+export function deployEnvironment(): string {
+  return process.env.VERCEL_ENV || (process.env.NODE_ENV === "production" ? "production" : "development");
+}
 
 /**
  * Scopes recommandés pour une app du nouveau Dev Dashboard (lecture seule des

@@ -1,5 +1,42 @@
 # Changelog — Orkestra Data Lens
 
+## [0.7.1] — Diagnostic serveur + migrations sans terminal local
+
+### Le problème
+« Erreur interne lors de l'enregistrement » sur `/api/shopify/oauth-config`,
+sans cause visible, alors que les variables Vercel étaient bien présentes — la
+table `shopify_oauth_config` (migration `0006`) n'était pas appliquée sur
+Supabase, et impossible de migrer sans terminal local.
+
+### Diagnostic serveur (Paramètres + `/api/system/diagnostic`)
+- Bloc « Diagnostic serveur » : `DATABASE_URL` présent, `ENCRYPTION_SECRET`
+  présent et valide (32+), **connexion PostgreSQL**, **tables critiques**
+  (`shops`, `shopify_tokens`, `shopify_oauth_config`, `products`, `orders`,
+  `order_line_items`, `refunds`, `sync_runs`), **dernière migration détectée**,
+  **environnement** (production/preview) et **URL d'app détectée**.
+- Si une table manque, le message exact est : « Migration manquante : table X
+  absente. »
+- _Note : la table des tokens chiffrés s'appelle `shopify_tokens` ; il n'existe
+  pas de table `shopify_connections` dans ce schéma._
+
+### Appliquer les migrations sans terminal
+- Route protégée **`POST /api/system/migrate`** : inerte tant que
+  `MIGRATION_SECRET` n'est pas configuré, secret obligatoire (header
+  `x-migration-secret`, query `?secret=` ou corps JSON), idempotente, logs
+  propres. La même protection couvre le `GET` (statut + SQL).
+- Bouton « Appliquer les migrations » dans Paramètres (saisie du secret).
+- Repli : « Afficher le SQL Supabase » — SQL idempotent complet à coller dans
+  Supabase SQL Editor (rendu via le serveur, jamais via une route ouverte).
+
+### Erreurs réelles, plus de « Erreur interne » générique
+- `/api/shopify/oauth-config` remonte désormais la cause exacte : table absente,
+  base injoignable, échec de chiffrement, contrainte SQL, secret invalide
+  (helper `describeServerError`, mapping des codes SQLSTATE PostgreSQL).
+
+### URL d'application
+- Plus d'URL Vercel codée en dur : l'app utilise `NEXT_PUBLIC_APP_URL`, sinon
+  l'origine réelle de la page (et `VERCEL_URL` côté serveur).
+
 ## [0.7.0] — Connexion Shopify : deux modes (token Admin API + Dev Dashboard OAuth)
 
 ### Le problème

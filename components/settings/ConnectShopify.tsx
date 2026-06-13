@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { toast } from "@/components/ui/Toaster";
-import { cn } from "@/lib/utils";
+import { cn, getClientAppUrl } from "@/lib/utils";
 
 type TestResult = {
   ok: boolean;
@@ -75,6 +75,12 @@ export function ConnectShopify({
 
   const redirectUrl = `${appUrl.replace(/\/$/, "")}/api/shopify/callback`;
 
+  // URL d'app : origine réelle de la page (ou NEXT_PUBLIC_APP_URL) plutôt
+  // qu'une URL codée en dur, si le serveur n'en a pas fourni.
+  useEffect(() => {
+    setAppUrl((prev) => prev || getClientAppUrl());
+  }, []);
+
   // Pré-remplissage si une config Dev Dashboard a déjà été enregistrée
   useEffect(() => {
     if (!manualAvailable) return;
@@ -85,7 +91,7 @@ export function ConnectShopify({
         if (cancelled || !data.ok || !data.config) return;
         setClientId(data.config.clientId);
         setScopes(data.config.scopes || defaultScopes);
-        setAppUrl(data.config.appUrl || defaultAppUrl);
+        setAppUrl(data.config.appUrl || getClientAppUrl());
         setHasSavedSecret(true);
       })
       .catch(() => {});
