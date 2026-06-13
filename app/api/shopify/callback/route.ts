@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySignedState } from "@/lib/server/crypto";
+import { hashOAuthState } from "@/lib/server/crypto";
 import { isDatabaseConfigured, isManualConnectAvailable } from "@/lib/server/env";
 import { ensureWebPixel } from "@/lib/server/pixel";
-import { resolveOAuthCredentials, upsertConnectedShop } from "@/lib/server/repo";
+import { consumeOAuthState, resolveOAuthCredentials, upsertConnectedShop } from "@/lib/server/repo";
 import {
   exchangeCodeForToken,
   fetchShopInfo,
@@ -11,13 +11,16 @@ import {
   verifyOAuthHmac,
 } from "@/lib/server/shopify";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 /**
  * Callback OAuth Shopify.
  *
- * Vérifie le HMAC + le state anti-CSRF, échange le code contre un access
- * token, stocke le token chiffré (AES-256-GCM) puis enregistre les webhooks.
- * Redirige vers l'onboarding avec un statut explicite — jamais de faux
- * « connecté » si une étape échoue.
+ * Vérifie le HMAC + le state anti-CSRF (stocké EN BASE, pas en cookie),
+ * échange le code contre un access token, stocke le token chiffré
+ * (AES-256-GCM) puis enregistre les webhooks. Redirige vers l'onboarding avec
+ * un statut explicite — jamais de faux « connecté » si une étape échoue.
  */
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -36,17 +39,24 @@ export async function GET(req: NextRequest) {
     return fail("invalid_hmac");
   }
 
-  // 2. Anti-CSRF : le state doit correspondre au cookie signé
+  // 2. Anti-CSRF : le state est vérifié EN BASE (présent, non expiré, non
+  // utilisé), puis marqué comme consommé. Erreur précise selon la cause.
   const state = params.get("state") ?? "";
-  const cookieState = req.cookies.get("orkestra_oauth_state")?.value ?? "";
-  const verified = verifySignedState(state);
-  if (!verified || state !== cookieState) {
-    console.warn("[oauth] State anti-CSRF invalide ou expiré");
-    return fail("invalid_state");
+  if (!state) return fail("state_missing");
+  const stateResult = await consumeOAuthState(hashOAuthState(state));
+  if (stateResult.status !== "ok") {
+    const code =
+      stateResult.status === "absent"
+        ? "state_db_absent"
+        : stateResult.status === "expired"
+          ? "state_expired"
+          : "state_used";
+    console.warn(`[oauth] State refusé : ${stateResult.status}`);
+    return fail(code);
   }
 
   const shopDomain = normalizeShopDomain(params.get("shop") ?? "");
-  if (!shopDomain || shopDomain !== verified.shopDomain) return fail("shop_mismatch");
+  if (!shopDomain || shopDomain !== stateResult.shopDomain) return fail("shop_mismatch");
 
   const code = params.get("code");
   if (!code) return fail("missing_code");
@@ -89,11 +99,12 @@ export async function GET(req: NextRequest) {
 
     console.log(`[oauth] Boutique connectée : ${shopDomain} (shop_id=${shop.id}, scopes=${scopes})`);
 
-    const response = NextResponse.redirect(
-      new URL(`/onboarding?step=3&connected=1&shop=${encodeURIComponent(shopDomain)}`, req.nextUrl.origin)
+    // Retour vers l'origine d'où l'autorisation a été lancée si disponible
+    // (cohérence de domaine), sinon l'origine du callback.
+    const base = stateResult.returnTo || req.nextUrl.origin;
+    return NextResponse.redirect(
+      new URL(`/onboarding?step=3&connected=1&shop=${encodeURIComponent(shopDomain)}`, base)
     );
-    response.cookies.delete("orkestra_oauth_state");
-    return response;
   } catch (err) {
     console.error("[oauth] Échec de connexion :", err instanceof Error ? err.message : err);
     return fail("token_exchange_failed");

@@ -1,5 +1,5 @@
 import "server-only";
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { env } from "./env";
 
 /**
@@ -30,24 +30,14 @@ export function decryptSecret(payload: string): string {
 
 // ─── State OAuth signé (anti-CSRF, porté par un cookie HttpOnly) ─────────────
 
-export function createSignedState(shopDomain: string): string {
-  const nonce = randomBytes(16).toString("base64url");
-  const payload = `${nonce}.${Date.now()}.${shopDomain}`;
-  const sig = createHmac("sha256", key()).update(payload).digest("base64url");
-  return `${payload}.${sig}`;
+/** State aléatoire opaque (anti-CSRF) — la valeur en clair va à Shopify. */
+export function randomOAuthState(): string {
+  return randomBytes(32).toString("base64url");
 }
 
-export function verifySignedState(state: string, maxAgeMs = 10 * 60 * 1000): { shopDomain: string } | null {
-  const parts = state.split(".");
-  if (parts.length !== 4) return null;
-  const [nonce, ts, shopDomain, sig] = parts;
-  const payload = `${nonce}.${ts}.${shopDomain}`;
-  const expected = createHmac("sha256", key()).update(payload).digest("base64url");
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  if (Date.now() - Number(ts) > maxAgeMs) return null;
-  return { shopDomain };
+/** Hash SHA-256 du state — seule cette empreinte est stockée en base. */
+export function hashOAuthState(state: string): string {
+  return createHash("sha256").update(state).digest("hex");
 }
 
 /** Masque un email avant stockage/affichage : jamais d'email client en clair. */
