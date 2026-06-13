@@ -19,9 +19,13 @@ async function main() {
     console.error("DATABASE_URL manquant (voir .env.example)");
     process.exit(1);
   }
+  // sslmode retiré de l'URL pour que l'objet ssl explicite soit bien appliqué.
+  const cleanedUrl = process.env.DATABASE_URL
+    .replace(/([?&])(sslmode|ssl|sslcert|sslkey|sslrootcert|uselibpqcompat)=[^&]*/gi, "$1")
+    .replace(/[?&]$/, "");
   const db = new Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? undefined : { rejectUnauthorized: false },
+    connectionString: cleanedUrl,
+    ssl: /localhost|127\.0\.0\.1/.test(cleanedUrl) ? false : { rejectUnauthorized: false },
   });
   await db.connect();
 

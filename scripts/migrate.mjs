@@ -13,7 +13,16 @@ async function main() {
     console.error("DATABASE_URL manquant (voir .env.example)");
     process.exit(1);
   }
-  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  // SSL forcé via objet explicite + sslmode retiré de l'URL (sinon pg ignore
+  // rejectUnauthorized:false → « self-signed certificate in chain » avec Supabase).
+  const cleanedUrl = process.env.DATABASE_URL
+    .replace(/([?&])(sslmode|ssl|sslcert|sslkey|sslrootcert|uselibpqcompat)=[^&]*/gi, "$1")
+    .replace(/[?&]$/, "");
+  const client = new pg.Client({
+    connectionString: cleanedUrl,
+    ssl: /localhost|127\.0\.0\.1/.test(cleanedUrl) ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+  });
   await client.connect();
 
   await client.query(`

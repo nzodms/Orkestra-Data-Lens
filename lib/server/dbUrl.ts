@@ -76,6 +76,47 @@ export function sslConfigFor(connectionString: string): false | { rejectUnauthor
   return /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false };
 }
 
+/**
+ * Retire les paramètres SSL de l'URL (sslmode, ssl, sslcert…).
+ *
+ * CRITIQUE : si `sslmode=require` reste dans la connectionString, node-postgres
+ * IGNORE l'objet `ssl: { rejectUnauthorized: false }` qu'on passe (il le réduit
+ * à `{}` et applique verify-full) → « self-signed certificate in chain » avec
+ * le pooler Supabase. En retirant sslmode de l'URL et en passant l'objet ssl
+ * explicitement, la config rejectUnauthorized:false est bien appliquée.
+ */
+export function stripSslParams(connectionString: string): string {
+  if (!connectionString) return connectionString;
+  try {
+    const u = new URL(connectionString);
+    for (const k of ["sslmode", "ssl", "sslcert", "sslkey", "sslrootcert", "uselibpqcompat"]) {
+      u.searchParams.delete(k);
+    }
+    return u.toString();
+  } catch {
+    // URL non parsable : on retire les paramètres ssl par regex (repli).
+    return connectionString.replace(/([?&])(sslmode|ssl|sslcert|sslkey|sslrootcert|uselibpqcompat)=[^&]*/gi, "$1").replace(/[?&]$/, "");
+  }
+}
+
+/**
+ * Config unique passée à TOUT client/pool `pg` (pool partagé, test de
+ * connexion, scripts). SSL forcé en distant via objet explicite — jamais via
+ * sslmode dans l'URL.
+ */
+export function pgClientConfig(connectionString: string): {
+  connectionString: string;
+  ssl: false | { rejectUnauthorized: boolean };
+  connectionTimeoutMillis: number;
+} {
+  const cleaned = stripSslParams(connectionString);
+  return {
+    connectionString: cleaned,
+    ssl: sslConfigFor(cleaned),
+    connectionTimeoutMillis: 10_000,
+  };
+}
+
 export function parsedDatabaseUrl(): ParsedDbUrl {
   return parseDatabaseUrl(env.databaseUrl);
 }
